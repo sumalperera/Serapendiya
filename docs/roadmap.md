@@ -22,6 +22,8 @@ Next:
   current change.
 - PR09: bounded synchronous group-commit coordination — implemented in the
   current change.
+- PR10: reproducible Linux Docker test environment — the next implementation
+  step.
 - Subsequent G1 work: durable-index persistence decisions and broader recovery
   testing.
 
