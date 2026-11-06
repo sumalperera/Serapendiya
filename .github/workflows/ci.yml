@@ -34,3 +34,4 @@ jobs:
       - run: ./scripts/run-g1-tests.sh
       - run: test -s docs/verification/PR10.md
       - run: test -s docs/verification/PR11.md
+      - run: test -s docs/verification/G1.md
