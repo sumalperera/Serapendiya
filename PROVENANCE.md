@@ -11,3 +11,14 @@ because it is listed in a future design document.
 
 The repository's own code is licensed under MIT. Dependency licence review is
 recorded with the verification evidence for the PR that introduces it.
+
+## Commercial separation
+
+Paid features are out of scope for this public repository. They belong in the
+private repository:
+
+`https://github.com/sumalperera/Serapendiya-commercial.git`
+
+Do not add commercial implementation code, entitlement logic, paid packaging,
+or proprietary assets here. Before implementing a feature that may be paid,
+confirm its destination repository and complete a provenance/licence review.
