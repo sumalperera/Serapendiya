@@ -16,7 +16,9 @@ Next:
   current change.
 - PR06: certified batch readers and malformed/contiguous recovery checks — the
   next implementation step.
-- Subsequent G1 work: indexes and group commit.
+- PR07: sparse derived segment indexes and index-rebuild tests — implemented in
+  the current change.
+- Subsequent G1 work: durable index persistence decisions and group commit.
 
 ## Commercial repository
 
