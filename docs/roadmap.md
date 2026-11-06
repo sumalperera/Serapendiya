@@ -20,8 +20,10 @@ Next:
   the current change.
 - PR08: explicit append/visible/durable position tracking — implemented in the
   current change.
-- Subsequent G1 work: measured group-commit coordination and durable-index
-  persistence decisions.
+- PR09: bounded synchronous group-commit coordination — implemented in the
+  current change.
+- Subsequent G1 work: durable-index persistence decisions and broader recovery
+  testing.
 
 ## Commercial repository
 
