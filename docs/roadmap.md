@@ -24,8 +24,10 @@ Next:
   current change.
 - PR10: reproducible Linux Docker test environment — the next implementation
   step.
-- Subsequent G1 work: durable-index persistence decisions and broader recovery
-  testing.
+- PR11: recovery hardening and certified-boundary matrix — implemented in the
+  current change.
+- Subsequent G1 work: decide durable-index persistence in ADR-003, then add it
+  only if explicitly approved.
 
 ## Commercial repository
 

@@ -33,3 +33,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/run-g1-tests.sh
       - run: test -s docs/verification/PR10.md
+      - run: test -s docs/verification/PR11.md
