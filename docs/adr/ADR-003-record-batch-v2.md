@@ -15,3 +15,12 @@ the implementation rejects unsupported shapes rather than claiming protocol
 compatibility.
 
 Approval record: approved by founder in the project conversation on 2026-11-07.
+
+## G1 closeout amendment
+
+For G1, sparse indexes remain derived in memory and are rebuilt from the
+certified segment during startup. No persistent index file is introduced. This
+avoids adding a second durable format before its framing, checksum, atomic
+replacement, rebuild, and migration rules are independently specified. A
+persistent index requires a future ADR amendment and approval before code is
+added.

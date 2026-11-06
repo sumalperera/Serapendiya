@@ -24,10 +24,10 @@ Next:
   current change.
 - PR10: reproducible Linux Docker test environment — the next implementation
   step.
-- PR11: recovery hardening and certified-boundary matrix — implemented in the
-  current change.
-- Subsequent G1 work: decide durable-index persistence in ADR-003, then add it
-  only if explicitly approved.
+- PR11: recovery hardening and certified-boundary matrix — implemented.
+- G1 closeout: process-level crash recovery, ADR-003 derived-index decision,
+  and consolidated verification — implemented in the current change.
+- Next gate: explicit authorization for G2 Kafka compatibility work.
 
 ## Commercial repository
 
