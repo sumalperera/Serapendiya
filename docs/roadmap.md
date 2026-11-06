@@ -12,8 +12,10 @@ Completed:
 
 Next:
 
-- PR05: fault-injectable I/O and durability-failure tests.
-- Subsequent G1 work: batch readers, recovery matrix, indexes, and group commit.
+- PR05: fault-injectable I/O and durability-failure tests — implemented in the
+  current change.
+- Subsequent G1 work: batch readers, a broader recovery matrix, indexes, and
+  group commit.
 
 ## Commercial repository
 

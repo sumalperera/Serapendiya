@@ -27,9 +27,59 @@ const CHECKPOINT_LEN: usize = 36;
 pub struct Log {
     directory: PathBuf,
     segment: File,
+    io: Box<dyn StorageIo>,
     certified_len: u64,
     next_offset: Offset,
     generation: u64,
+    terminal_error: Option<String>,
+}
+
+/// Filesystem operations that define the durable boundary of the append log.
+///
+/// Production uses [`RealStorageIo`]. The seam exists so failure ordering can
+/// be tested without pretending that an in-memory mock proves filesystem
+/// crash-safety.
+pub trait StorageIo: Send + Sync + std::fmt::Debug {
+    fn write_segment(&self, file: &mut File, bytes: &[u8]) -> io::Result<()>;
+    fn sync_segment(&self, file: &File) -> io::Result<()>;
+    fn truncate_segment(&self, file: &File, length: u64) -> io::Result<()>;
+    fn write_checkpoint(&self, file: &mut File, bytes: &[u8]) -> io::Result<()>;
+    fn sync_checkpoint(&self, file: &File) -> io::Result<()>;
+    fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()>;
+    fn sync_directory(&self, directory: &Path) -> io::Result<()>;
+}
+
+#[derive(Debug, Default)]
+pub struct RealStorageIo;
+
+impl StorageIo for RealStorageIo {
+    fn write_segment(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        file.write_all(bytes)
+    }
+
+    fn sync_segment(&self, file: &File) -> io::Result<()> {
+        file.sync_all()
+    }
+
+    fn truncate_segment(&self, file: &File, length: u64) -> io::Result<()> {
+        file.set_len(length)
+    }
+
+    fn write_checkpoint(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        file.write_all(bytes)
+    }
+
+    fn sync_checkpoint(&self, file: &File) -> io::Result<()> {
+        file.sync_all()
+    }
+
+    fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
+        fs::rename(temporary, final_path)
+    }
+
+    fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+        File::open(directory)?.sync_all()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,6 +91,10 @@ struct Checkpoint {
 
 impl Log {
     pub fn open(directory: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_io(directory, Box::new(RealStorageIo))
+    }
+
+    pub fn open_with_io(directory: impl AsRef<Path>, io: Box<dyn StorageIo>) -> Result<Self> {
         let directory = directory.as_ref().to_owned();
         fs::create_dir_all(&directory)?;
         let checkpoint_path = directory.join("checkpoint");
@@ -69,20 +123,25 @@ impl Log {
         }
         recover_certified_prefix(&mut segment, checkpoint)?;
         if actual_len > checkpoint.certified_len {
-            segment.set_len(checkpoint.certified_len)?;
-            segment.sync_all()?;
+            io.truncate_segment(&segment, checkpoint.certified_len)?;
+            io.sync_segment(&segment)?;
         }
         segment.seek(SeekFrom::End(0))?;
         Ok(Self {
             directory,
             segment,
+            io,
             certified_len: checkpoint.certified_len,
             next_offset: checkpoint.next_offset,
             generation: checkpoint.generation,
+            terminal_error: None,
         })
     }
 
     pub fn append(&mut self, records: &[u8]) -> Result<Offset> {
+        if let Some(reason) = &self.terminal_error {
+            return Err(Error::StorageTerminal(reason.clone()));
+        }
         let records_len = records.len();
         let batch_length = FIXED_BATCH_REMAINDER
             .checked_add(records_len)
@@ -93,8 +152,12 @@ impl Log {
         let base_offset = self.next_offset;
         let frame = encode_batch(base_offset, batch_length_i32, records);
         self.segment.seek(SeekFrom::Start(self.certified_len))?;
-        self.segment.write_all(&frame)?;
-        self.segment.sync_all()?;
+        if let Err(error) = self.io.write_segment(&mut self.segment, &frame) {
+            return Err(self.terminal(error));
+        }
+        if let Err(error) = self.io.sync_segment(&self.segment) {
+            return Err(self.terminal(error));
+        }
 
         let new_checkpoint = Checkpoint {
             certified_len: self.certified_len + frame.len() as u64,
@@ -106,11 +169,19 @@ impl Log {
                 .checked_add(1)
                 .ok_or_else(|| Error::InvalidCheckpoint("generation overflow".into()))?,
         };
-        write_checkpoint(&self.directory, new_checkpoint)?;
+        if let Err(error) = write_checkpoint(&self.directory, new_checkpoint, self.io.as_ref()) {
+            return Err(self.terminal(error));
+        }
         self.certified_len = new_checkpoint.certified_len;
         self.next_offset = new_checkpoint.next_offset;
         self.generation = new_checkpoint.generation;
         Ok(base_offset)
+    }
+
+    fn terminal(&mut self, error: io::Error) -> Error {
+        let reason = error.to_string();
+        self.terminal_error = Some(reason.clone());
+        Error::StorageTerminal(reason)
     }
 
     pub fn certified_len(&self) -> u64 {
@@ -260,7 +331,11 @@ fn read_checkpoint(path: &Path) -> Result<Checkpoint> {
     })
 }
 
-fn write_checkpoint(directory: &Path, checkpoint: Checkpoint) -> Result<()> {
+fn write_checkpoint(
+    directory: &Path,
+    checkpoint: Checkpoint,
+    io: &dyn StorageIo,
+) -> io::Result<()> {
     let mut bytes = [0u8; CHECKPOINT_LEN];
     bytes[..4].copy_from_slice(MAGIC);
     bytes[4] = CHECKPOINT_VERSION;
@@ -277,10 +352,10 @@ fn write_checkpoint(directory: &Path, checkpoint: Checkpoint) -> Result<()> {
         .truncate(true)
         .write(true)
         .open(&temporary)?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    fs::rename(&temporary, &final_path)?;
-    File::open(directory)?.sync_all()?;
+    io.write_checkpoint(&mut file, &bytes)?;
+    io.sync_checkpoint(&file)?;
+    io.rename_checkpoint(&temporary, &final_path)?;
+    io.sync_directory(directory)?;
     Ok(())
 }
 
@@ -298,14 +373,99 @@ fn crc32c(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[derive(Clone, Copy, Debug)]
+    enum FailurePoint {
+        SegmentWrite,
+        PartialSegmentWrite,
+        SegmentSync,
+        CheckpointWrite,
+        CheckpointSync,
+        CheckpointRename,
+        DirectorySync,
+    }
+
+    #[derive(Debug)]
+    struct FaultIo {
+        point: FailurePoint,
+    }
+
+    impl FaultIo {
+        fn error(point: FailurePoint) -> io::Error {
+            io::Error::other(format!("injected {point:?}"))
+        }
+    }
+
+    impl StorageIo for FaultIo {
+        fn write_segment(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+            match self.point {
+                FailurePoint::SegmentWrite => Err(Self::error(self.point)),
+                FailurePoint::PartialSegmentWrite => {
+                    file.write_all(&bytes[..bytes.len() / 2])?;
+                    Err(Self::error(self.point))
+                }
+                _ => file.write_all(bytes),
+            }
+        }
+
+        fn sync_segment(&self, file: &File) -> io::Result<()> {
+            if matches!(self.point, FailurePoint::SegmentSync) {
+                Err(Self::error(self.point))
+            } else {
+                file.sync_all()
+            }
+        }
+
+        fn truncate_segment(&self, file: &File, length: u64) -> io::Result<()> {
+            file.set_len(length)
+        }
+
+        fn write_checkpoint(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+            if matches!(self.point, FailurePoint::CheckpointWrite) {
+                Err(Self::error(self.point))
+            } else {
+                file.write_all(bytes)
+            }
+        }
+
+        fn sync_checkpoint(&self, file: &File) -> io::Result<()> {
+            if matches!(self.point, FailurePoint::CheckpointSync) {
+                Err(Self::error(self.point))
+            } else {
+                file.sync_all()
+            }
+        }
+
+        fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
+            if matches!(self.point, FailurePoint::CheckpointRename) {
+                Err(Self::error(self.point))
+            } else {
+                fs::rename(temporary, final_path)
+            }
+        }
+
+        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+            if matches!(self.point, FailurePoint::DirectorySync) {
+                Err(Self::error(self.point))
+            } else {
+                File::open(directory)?.sync_all()
+            }
+        }
+    }
 
     fn temp_dir() -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("serapendiya-storage-{nonce}"))
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("serapendiya-storage-{nonce}-{counter}"))
     }
 
     #[test]
@@ -362,5 +522,44 @@ mod tests {
         assert_eq!(log.certified_len(), certified_len);
         assert_eq!(fs::metadata(path).unwrap().len(), certified_len);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_torn_checkpoint() {
+        let dir = temp_dir();
+        {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+        }
+        let checkpoint = dir.join("checkpoint");
+        let mut file = OpenOptions::new().write(true).open(checkpoint).unwrap();
+        file.seek(SeekFrom::Start(8)).unwrap();
+        file.write_all(&[1]).unwrap();
+        file.sync_all().unwrap();
+        assert!(matches!(Log::open(&dir), Err(Error::InvalidCheckpoint(_))));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn assert_terminal_after_failure(point: FailurePoint) {
+        let dir = temp_dir();
+        let mut log = Log::open_with_io(&dir, Box::new(FaultIo { point })).unwrap();
+        assert!(matches!(log.append(b"one"), Err(Error::StorageTerminal(_))));
+        assert!(matches!(log.append(b"two"), Err(Error::StorageTerminal(_))));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn segment_failures_are_terminal() {
+        assert_terminal_after_failure(FailurePoint::SegmentWrite);
+        assert_terminal_after_failure(FailurePoint::PartialSegmentWrite);
+        assert_terminal_after_failure(FailurePoint::SegmentSync);
+    }
+
+    #[test]
+    fn checkpoint_failures_are_terminal() {
+        assert_terminal_after_failure(FailurePoint::CheckpointWrite);
+        assert_terminal_after_failure(FailurePoint::CheckpointSync);
+        assert_terminal_after_failure(FailurePoint::CheckpointRename);
+        assert_terminal_after_failure(FailurePoint::DirectorySync);
     }
 }

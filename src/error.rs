@@ -20,6 +20,8 @@ pub enum Error {
     CertifiedCorruption { position: u64, reason: String },
     #[error("storage batch is invalid: {0}")]
     InvalidBatch(String),
+    #[error("storage is terminally unavailable: {0}")]
+    StorageTerminal(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
