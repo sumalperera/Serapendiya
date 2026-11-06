@@ -22,3 +22,4 @@ jobs:
       - run: test -s docs/verification/PR03.md
       - run: test -s docs/verification/PR04.md
       - run: test -s docs/verification/PR05.md
+      - run: test -s docs/verification/PR06.md
