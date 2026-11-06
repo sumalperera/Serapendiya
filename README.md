@@ -18,3 +18,13 @@ cargo run --bin streamctl -- --help
 
 The storage slice is not a broker, wire-protocol implementation, or production
 durability claim. Its supported surface is documented in ADR-003 and ADR-004.
+
+## Delivery tracks
+
+This repository is the open-source Serapendiya track. Paid and commercial
+features belong exclusively in the private [Serapendiya-commercial repository](https://github.com/sumalperera/Serapendiya-commercial.git)
+and must not be implemented or copied into this repository.
+
+The next open-source step is PR05: fault-injection and durability-failure
+testing for the approved storage slice. See [docs/roadmap.md](docs/roadmap.md)
+for the separation rules and sequencing.
