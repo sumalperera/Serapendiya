@@ -879,6 +879,85 @@ mod tests {
     }
 
     #[test]
+    fn rejects_checkpoint_offset_mismatch() {
+        let dir = temp_dir();
+        let (certified_len, generation) = {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+            (log.certified_len(), 1)
+        };
+        write_checkpoint(
+            &dir,
+            Checkpoint {
+                certified_len,
+                next_offset: Offset::new(9),
+                generation,
+            },
+            &RealStorageIo,
+        )
+        .unwrap();
+        assert!(matches!(
+            Log::open(&dir),
+            Err(Error::InvalidCheckpoint(reason)) if reason == "checkpoint does not match certified batches"
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_checkpoint_boundary_inside_batch() {
+        let dir = temp_dir();
+        let (certified_len, generation) = {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+            (log.certified_len(), 1)
+        };
+        write_checkpoint(
+            &dir,
+            Checkpoint {
+                certified_len: certified_len - 1,
+                next_offset: Offset::ZERO,
+                generation,
+            },
+            &RealStorageIo,
+        )
+        .unwrap();
+        assert!(matches!(
+            Log::open(&dir),
+            Err(Error::CertifiedCorruption { .. })
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn truncates_valid_uncertified_batch_and_rebuilds_metadata() {
+        let dir = temp_dir();
+        let certified_len = {
+            let mut log = Log::open(&dir).unwrap();
+            for number in 0..17u8 {
+                log.append(&[number]).unwrap();
+            }
+            log.certified_len()
+        };
+        let path = dir.join("segment-000000.log");
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(&encode_batch(
+            Offset::new(17),
+            (FIXED_BATCH_REMAINDER + 4) as i32,
+            b"tail",
+        ))
+        .unwrap();
+        file.sync_all().unwrap();
+
+        let mut log = Log::open(&dir).unwrap();
+        assert_eq!(log.certified_len(), certified_len);
+        assert_eq!(log.batch_count(), 17);
+        assert_eq!(log.index_entries().len(), 2);
+        assert_eq!(log.read_batch(Offset::new(17)).unwrap(), None);
+        assert_eq!(fs::metadata(path).unwrap().len(), certified_len);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn rejects_truncated_certified_segment() {
         let dir = temp_dir();
         let certified_len = {
