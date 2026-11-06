@@ -26,3 +26,10 @@ jobs:
       - run: test -s docs/verification/PR07.md
       - run: test -s docs/verification/PR08.md
       - run: test -s docs/verification/PR09.md
+
+  linux-docker-g1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/run-g1-tests.sh
+      - run: test -s docs/verification/PR10.md
