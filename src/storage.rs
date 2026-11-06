@@ -31,7 +31,14 @@ pub struct Log {
     certified_len: u64,
     next_offset: Offset,
     generation: u64,
+    batch_count: u64,
     terminal_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredBatch {
+    pub offset: Offset,
+    pub records: Vec<u8>,
 }
 
 /// Filesystem operations that define the durable boundary of the append log.
@@ -121,7 +128,7 @@ impl Log {
                 "certified length exceeds segment length".into(),
             ));
         }
-        recover_certified_prefix(&mut segment, checkpoint)?;
+        let batch_count = recover_certified_prefix(&mut segment, checkpoint)?;
         if actual_len > checkpoint.certified_len {
             io.truncate_segment(&segment, checkpoint.certified_len)?;
             io.sync_segment(&segment)?;
@@ -134,6 +141,7 @@ impl Log {
             certified_len: checkpoint.certified_len,
             next_offset: checkpoint.next_offset,
             generation: checkpoint.generation,
+            batch_count,
             terminal_error: None,
         })
     }
@@ -175,6 +183,7 @@ impl Log {
         self.certified_len = new_checkpoint.certified_len;
         self.next_offset = new_checkpoint.next_offset;
         self.generation = new_checkpoint.generation;
+        self.batch_count += 1;
         Ok(base_offset)
     }
 
@@ -189,6 +198,43 @@ impl Log {
     }
     pub fn next_offset(&self) -> Offset {
         self.next_offset
+    }
+    pub fn batch_count(&self) -> u64 {
+        self.batch_count
+    }
+
+    pub fn read_batch(&mut self, requested: Offset) -> Result<Option<StoredBatch>> {
+        self.segment.seek(SeekFrom::Start(0))?;
+        let mut position = 0u64;
+        let mut expected_offset = Offset::ZERO;
+        while position < self.certified_len {
+            let frame = read_frame(&mut self.segment, position, self.certified_len)?;
+            if frame.base_offset != expected_offset {
+                return Err(Error::CertifiedCorruption {
+                    position,
+                    reason: "base offset is not contiguous".into(),
+                });
+            }
+            validate_frame(&frame, position)?;
+            if frame.base_offset == requested {
+                return Ok(Some(StoredBatch {
+                    offset: frame.base_offset,
+                    records: frame.data[HEADER_LEN..].to_vec(),
+                }));
+            }
+            if frame.base_offset > requested {
+                return Ok(None);
+            }
+            position += frame.bytes as u64;
+            expected_offset =
+                expected_offset
+                    .checked_next()
+                    .ok_or_else(|| Error::CertifiedCorruption {
+                        position,
+                        reason: "offset overflow".into(),
+                    })?;
+        }
+        Ok(None)
     }
 }
 
@@ -213,10 +259,11 @@ fn encode_batch(base_offset: Offset, batch_length: i32, records: &[u8]) -> Vec<u
     frame
 }
 
-fn recover_certified_prefix(segment: &mut File, checkpoint: Checkpoint) -> Result<()> {
+fn recover_certified_prefix(segment: &mut File, checkpoint: Checkpoint) -> Result<u64> {
     segment.seek(SeekFrom::Start(0))?;
     let mut position = 0u64;
     let mut expected_offset = Offset::ZERO;
+    let mut batch_count = 0u64;
     while position < checkpoint.certified_len {
         let frame = read_frame(segment, position, checkpoint.certified_len)?;
         if frame.base_offset != expected_offset {
@@ -234,13 +281,14 @@ fn recover_certified_prefix(segment: &mut File, checkpoint: Checkpoint) -> Resul
                     position,
                     reason: "offset overflow".into(),
                 })?;
+        batch_count += 1;
     }
     if position != checkpoint.certified_len || expected_offset != checkpoint.next_offset {
         return Err(Error::InvalidCheckpoint(
             "checkpoint does not match certified batches".into(),
         ));
     }
-    Ok(())
+    Ok(batch_count)
 }
 
 struct Frame {
@@ -561,5 +609,97 @@ mod tests {
         assert_terminal_after_failure(FailurePoint::CheckpointSync);
         assert_terminal_after_failure(FailurePoint::CheckpointRename);
         assert_terminal_after_failure(FailurePoint::DirectorySync);
+    }
+
+    #[test]
+    fn reads_batches_by_certified_offset() {
+        let dir = temp_dir();
+        {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+            log.append(b"two").unwrap();
+        }
+        let mut log = Log::open(&dir).unwrap();
+        assert_eq!(log.batch_count(), 2);
+        assert_eq!(
+            log.read_batch(Offset::ZERO).unwrap(),
+            Some(StoredBatch {
+                offset: Offset::ZERO,
+                records: b"one".to_vec()
+            })
+        );
+        assert_eq!(
+            log.read_batch(Offset::new(1)).unwrap(),
+            Some(StoredBatch {
+                offset: Offset::new(1),
+                records: b"two".to_vec()
+            })
+        );
+        assert_eq!(log.read_batch(Offset::new(2)).unwrap(), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_truncated_certified_segment() {
+        let dir = temp_dir();
+        let certified_len = {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+            log.certified_len()
+        };
+        let path = dir.join("segment-000000.log");
+        let file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(certified_len - 1).unwrap();
+        file.sync_all().unwrap();
+        assert!(matches!(Log::open(&dir), Err(Error::InvalidCheckpoint(_))));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_non_contiguous_certified_batch() {
+        let dir = temp_dir();
+        {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+            log.append(b"two").unwrap();
+        }
+        let path = dir.join("segment-000000.log");
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let second_position = (HEADER_LEN + 3) as u64;
+        file.seek(SeekFrom::Start(second_position)).unwrap();
+        file.write_all(&0i64.to_be_bytes()).unwrap();
+        file.sync_all().unwrap();
+        assert!(matches!(
+            Log::open(&dir),
+            Err(Error::CertifiedCorruption { reason, .. }) if reason == "base offset is not contiguous"
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_malformed_certified_length() {
+        let dir = temp_dir();
+        {
+            let mut log = Log::open(&dir).unwrap();
+            log.append(b"one").unwrap();
+        }
+        let path = dir.join("segment-000000.log");
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.seek(SeekFrom::Start(8)).unwrap();
+        file.write_all(&i32::MAX.to_be_bytes()).unwrap();
+        file.sync_all().unwrap();
+        assert!(matches!(
+            Log::open(&dir),
+            Err(Error::CertifiedCorruption { .. })
+        ));
+        fs::remove_dir_all(dir).unwrap();
     }
 }
