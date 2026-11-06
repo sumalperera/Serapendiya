@@ -18,7 +18,10 @@ Next:
   next implementation step.
 - PR07: sparse derived segment indexes and index-rebuild tests — implemented in
   the current change.
-- Subsequent G1 work: durable index persistence decisions and group commit.
+- PR08: explicit append/visible/durable position tracking — implemented in the
+  current change.
+- Subsequent G1 work: measured group-commit coordination and durable-index
+  persistence decisions.
 
 ## Commercial repository
 
