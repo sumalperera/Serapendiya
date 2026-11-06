@@ -1,0 +1,31 @@
+$ cargo build --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.72s
+exit_code=0
+
+$ cargo fmt --all --check
+exit_code=0
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+exit_code=0
+
+$ cargo test --workspace
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 1 test
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+exit_code=0
+
+$ cargo run --bin streamd -- --version
+streamd 0.1.0
+exit_code=0
+
+$ cargo run --bin streamctl -- --help
+Serapendiya command-line client
+
+Usage: streamctl [COMMAND]
+
+Commands:
+  info  Show the client surface available in this build
+  help  Print this message or the help of the given subcommand(s)
+exit_code=0
