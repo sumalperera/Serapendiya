@@ -1,50 +1,53 @@
-# Serapendiya delivery plan
+# Serapendiya delivery roadmap
 
-## Open-source repository
+## Current stage: ideation plus technical foundation
 
-`https://github.com/sumalperera/Serapendiya`
+Serapendiya is not presented as production-ready software. The project has a
+working Rust foundation and an approved local-storage implementation, while the
+customer-facing streaming workflow is still ahead.
 
-Completed:
+### Completed open-source gates
 
-- G0 foundation, CLI skeleton, configuration, domain types, CI, and ADRs.
-- First approved G1 storage slice: append log, RecordBatch v2-shaped framing,
-  CRC32C, durable checkpoints, and certified-prefix recovery.
+- G0: workspace, configuration, domain primitives, CLI skeleton, CI, ADRs, and
+  provenance policy.
+- G1: local append storage, CRC validation, durable checkpoints, recovery,
+  derived indexes, bounded group commit, fault injection, crash harness, and
+  Docker/Linux verification.
 
-Next:
+### Next authorized decision
 
-- PR05: fault-injectable I/O and durability-failure tests — implemented in the
-  current change.
-- PR06: certified batch readers and malformed/contiguous recovery checks — the
-  next implementation step.
-- PR07: sparse derived segment indexes and index-rebuild tests — implemented in
-  the current change.
-- PR08: explicit append/visible/durable position tracking — implemented in the
-  current change.
-- PR09: bounded synchronous group-commit coordination — implemented in the
-  current change.
-- PR10: reproducible Linux Docker test environment — the next implementation
-  step.
-- PR11: recovery hardening and certified-boundary matrix — implemented.
-- G1 closeout: process-level crash recovery, ADR-003 derived-index decision,
-  and consolidated verification — implemented in the current change.
-- Next gate: explicit authorization for G2 Kafka compatibility work.
+G2 Kafka compatibility requires explicit authorization. It must remain a narrow,
+tested subset with honest unsupported errors and real client evidence. No Kafka
+wire implementation exists in this repository yet.
 
-## Commercial repository
+### Future product gates
+
+- G3: independent broadcast and queue subscription state.
+- G4: local developer workflow, diagnostics, and safe replay preview.
+- G5: fuzzing, stress, security, recovery playbooks, and release hardening.
+
+These stages are sequencing gates, not delivery-date promises.
+
+## Investor-demo hypothesis
+
+The smallest compelling demonstration is:
+
+```text
+publish event → inspect event → restart process → recover event
+```
+
+That workflow should be built and tested as a vertical slice only after the
+relevant gates are authorized. It must be presented as a prototype until client
+compatibility, recovery, security, and operational claims are independently
+verified.
+
+## Commercial separation
+
+Paid or proprietary features belong in:
 
 `https://github.com/sumalperera/Serapendiya-commercial`
 
-All paid or proprietary features must be implemented and licensed there. The
-public repository must not receive commercial code, proprietary assets,
-entitlement checks, paid packaging, or private service credentials.
-
-If an open-source component is required by both tracks, implement it here only
-when it is independently useful, MIT-compatible, and explicitly approved as
-open source. Commercial integrations should depend on the public track rather
-than the public track depending on commercial code.
-
-## Change-control rule
-
-Before starting any feature, classify it as open source or commercial and
-record the destination repository. A feature with uncertain classification is
-blocked until that decision is made. The two repositories must remain separate
-in commits, release artifacts, credentials, and licensing claims.
+The public repository must not contain commercial implementation code,
+proprietary assets, entitlement checks, paid packaging, or private credentials.
+Any shared open-source component must be independently useful, MIT-compatible,
+and explicitly classified as open source before implementation.
