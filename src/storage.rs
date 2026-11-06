@@ -34,6 +34,9 @@ pub struct Log {
     generation: u64,
     batch_count: u64,
     index: Vec<IndexEntry>,
+    append_position: u64,
+    visible_offset: Option<Offset>,
+    durable_offset: Option<Offset>,
     terminal_error: Option<String>,
 }
 
@@ -47,6 +50,13 @@ pub struct StoredBatch {
 pub struct IndexEntry {
     pub offset: Offset,
     pub position: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LogPositions {
+    pub append_position: u64,
+    pub visible_offset: Option<Offset>,
+    pub durable_offset: Option<Offset>,
 }
 
 struct RecoverySummary {
@@ -147,6 +157,7 @@ impl Log {
             io.sync_segment(&segment)?;
         }
         segment.seek(SeekFrom::End(0))?;
+        let durable_offset = checkpoint.next_offset.get().checked_sub(1).map(Offset::new);
         Ok(Self {
             directory,
             segment,
@@ -156,6 +167,9 @@ impl Log {
             generation: checkpoint.generation,
             batch_count: recovery.batch_count,
             index: recovery.index,
+            append_position: checkpoint.certified_len,
+            visible_offset: durable_offset,
+            durable_offset,
             terminal_error: None,
         })
     }
@@ -173,16 +187,22 @@ impl Log {
             .map_err(|_| Error::InvalidBatch("batch exceeds signed 32-bit length".into()))?;
         let base_offset = self.next_offset;
         let frame = encode_batch(base_offset, batch_length_i32, records);
+        let append_position = self
+            .certified_len
+            .checked_add(frame.len() as u64)
+            .ok_or_else(|| Error::InvalidBatch("append position overflow".into()))?;
         self.segment.seek(SeekFrom::Start(self.certified_len))?;
         if let Err(error) = self.io.write_segment(&mut self.segment, &frame) {
             return Err(self.terminal(error));
         }
+        self.append_position = append_position;
         if let Err(error) = self.io.sync_segment(&self.segment) {
             return Err(self.terminal(error));
         }
+        self.visible_offset = Some(base_offset);
 
         let new_checkpoint = Checkpoint {
-            certified_len: self.certified_len + frame.len() as u64,
+            certified_len: append_position,
             next_offset: base_offset
                 .checked_next()
                 .ok_or_else(|| Error::InvalidBatch("offset overflow".into()))?,
@@ -197,6 +217,7 @@ impl Log {
         self.certified_len = new_checkpoint.certified_len;
         self.next_offset = new_checkpoint.next_offset;
         self.generation = new_checkpoint.generation;
+        self.durable_offset = Some(base_offset);
         let next_batch_count = self
             .batch_count
             .checked_add(1)
@@ -228,6 +249,13 @@ impl Log {
     }
     pub fn index_entries(&self) -> &[IndexEntry] {
         &self.index
+    }
+    pub fn positions(&self) -> LogPositions {
+        LogPositions {
+            append_position: self.append_position,
+            visible_offset: self.visible_offset,
+            durable_offset: self.durable_offset,
+        }
     }
 
     pub fn read_batch(&mut self, requested: Offset) -> Result<Option<StoredBatch>> {
@@ -719,6 +747,44 @@ mod tests {
                 records: vec![16]
             })
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn tracks_append_visible_and_durable_positions() {
+        let dir = temp_dir();
+        let mut log = Log::open(&dir).unwrap();
+        assert_eq!(
+            log.positions(),
+            LogPositions {
+                append_position: 0,
+                visible_offset: None,
+                durable_offset: None,
+            }
+        );
+        log.append(b"one").unwrap();
+        let positions = log.positions();
+        assert!(positions.append_position > 0);
+        assert_eq!(positions.visible_offset, Some(Offset::ZERO));
+        assert_eq!(positions.durable_offset, Some(Offset::ZERO));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn checkpoint_failure_separates_visible_from_durable() {
+        let dir = temp_dir();
+        let mut log = Log::open_with_io(
+            &dir,
+            Box::new(FaultIo {
+                point: FailurePoint::CheckpointSync,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(log.append(b"one"), Err(Error::StorageTerminal(_))));
+        let positions = log.positions();
+        assert!(positions.append_position > 0);
+        assert_eq!(positions.visible_offset, Some(Offset::ZERO));
+        assert_eq!(positions.durable_offset, None);
         fs::remove_dir_all(dir).unwrap();
     }
 
