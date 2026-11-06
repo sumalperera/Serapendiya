@@ -175,37 +175,67 @@ impl Log {
     }
 
     pub fn append(&mut self, records: &[u8]) -> Result<Offset> {
+        self.append_group(&[records])?
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::InvalidBatch("single append produced no offset".into()))
+    }
+
+    pub fn append_group(&mut self, batches: &[&[u8]]) -> Result<Vec<Offset>> {
         if let Some(reason) = &self.terminal_error {
             return Err(Error::StorageTerminal(reason.clone()));
         }
-        let records_len = records.len();
-        let batch_length = FIXED_BATCH_REMAINDER
-            .checked_add(records_len)
-            .ok_or_else(|| Error::InvalidBatch("batch length overflow".into()))?;
-        let batch_length_i32: i32 = batch_length
-            .try_into()
-            .map_err(|_| Error::InvalidBatch("batch exceeds signed 32-bit length".into()))?;
-        let base_offset = self.next_offset;
-        let frame = encode_batch(base_offset, batch_length_i32, records);
+        if batches.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut next_offset = self.next_offset;
+        let mut offsets = Vec::with_capacity(batches.len());
+        let mut frames = Vec::with_capacity(batches.len());
+        let mut total_len = 0usize;
+        for records in batches {
+            let batch_length = FIXED_BATCH_REMAINDER
+                .checked_add(records.len())
+                .ok_or_else(|| Error::InvalidBatch("batch length overflow".into()))?;
+            let batch_length_i32: i32 = batch_length
+                .try_into()
+                .map_err(|_| Error::InvalidBatch("batch exceeds signed 32-bit length".into()))?;
+            let base_offset = next_offset;
+            let frame = encode_batch(base_offset, batch_length_i32, records);
+            total_len = total_len
+                .checked_add(frame.len())
+                .ok_or_else(|| Error::InvalidBatch("group length overflow".into()))?;
+            offsets.push(base_offset);
+            frames.push(frame);
+            next_offset = next_offset
+                .checked_next()
+                .ok_or_else(|| Error::InvalidBatch("offset overflow".into()))?;
+        }
+        let next_batch_count = self
+            .batch_count
+            .checked_add(batches.len() as u64)
+            .ok_or_else(|| Error::InvalidBatch("batch count overflow".into()))?;
+        let mut group = Vec::with_capacity(total_len);
+        for frame in &frames {
+            group.extend_from_slice(frame);
+        }
         let append_position = self
             .certified_len
-            .checked_add(frame.len() as u64)
+            .checked_add(group.len() as u64)
             .ok_or_else(|| Error::InvalidBatch("append position overflow".into()))?;
         self.segment.seek(SeekFrom::Start(self.certified_len))?;
-        if let Err(error) = self.io.write_segment(&mut self.segment, &frame) {
+        if let Err(error) = self.io.write_segment(&mut self.segment, &group) {
             return Err(self.terminal(error));
         }
         self.append_position = append_position;
         if let Err(error) = self.io.sync_segment(&self.segment) {
             return Err(self.terminal(error));
         }
-        self.visible_offset = Some(base_offset);
+        self.visible_offset = offsets.last().copied();
 
         let new_checkpoint = Checkpoint {
             certified_len: append_position,
-            next_offset: base_offset
-                .checked_next()
-                .ok_or_else(|| Error::InvalidBatch("offset overflow".into()))?,
+            next_offset,
             generation: self
                 .generation
                 .checked_add(1)
@@ -217,19 +247,19 @@ impl Log {
         self.certified_len = new_checkpoint.certified_len;
         self.next_offset = new_checkpoint.next_offset;
         self.generation = new_checkpoint.generation;
-        self.durable_offset = Some(base_offset);
-        let next_batch_count = self
-            .batch_count
-            .checked_add(1)
-            .ok_or_else(|| Error::InvalidBatch("batch count overflow".into()))?;
-        if self.batch_count % INDEX_STRIDE == 0 {
-            self.index.push(IndexEntry {
-                offset: base_offset,
-                position: self.certified_len - frame.len() as u64,
-            });
+        self.durable_offset = offsets.last().copied();
+        let mut position = self.certified_len - group.len() as u64;
+        for (index, frame) in frames.iter().enumerate() {
+            if (self.batch_count + index as u64) % INDEX_STRIDE == 0 {
+                self.index.push(IndexEntry {
+                    offset: offsets[index],
+                    position,
+                });
+            }
+            position += frame.len() as u64;
         }
         self.batch_count = next_batch_count;
-        Ok(base_offset)
+        Ok(offsets)
     }
 
     fn terminal(&mut self, error: io::Error) -> Error {
@@ -499,6 +529,7 @@ fn crc32c(bytes: &[u8]) -> u32 {
 mod tests {
     use super::*;
     use std::{
+        sync::Arc,
         sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -581,6 +612,44 @@ mod tests {
             } else {
                 File::open(directory)?.sync_all()
             }
+        }
+    }
+
+    #[derive(Debug)]
+    struct CountingIo {
+        segment_syncs: Arc<AtomicU64>,
+        checkpoint_syncs: Arc<AtomicU64>,
+    }
+
+    impl StorageIo for CountingIo {
+        fn write_segment(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+            RealStorageIo.write_segment(file, bytes)
+        }
+
+        fn sync_segment(&self, file: &File) -> io::Result<()> {
+            self.segment_syncs.fetch_add(1, Ordering::Relaxed);
+            RealStorageIo.sync_segment(file)
+        }
+
+        fn truncate_segment(&self, file: &File, length: u64) -> io::Result<()> {
+            RealStorageIo.truncate_segment(file, length)
+        }
+
+        fn write_checkpoint(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+            RealStorageIo.write_checkpoint(file, bytes)
+        }
+
+        fn sync_checkpoint(&self, file: &File) -> io::Result<()> {
+            self.checkpoint_syncs.fetch_add(1, Ordering::Relaxed);
+            RealStorageIo.sync_checkpoint(file)
+        }
+
+        fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
+            RealStorageIo.rename_checkpoint(temporary, final_path)
+        }
+
+        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+            RealStorageIo.sync_directory(directory)
         }
     }
 
@@ -785,6 +854,27 @@ mod tests {
         assert!(positions.append_position > 0);
         assert_eq!(positions.visible_offset, Some(Offset::ZERO));
         assert_eq!(positions.durable_offset, None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn group_commit_syncs_once_for_multiple_batches() {
+        let dir = temp_dir();
+        let segment_syncs = Arc::new(AtomicU64::new(0));
+        let checkpoint_syncs = Arc::new(AtomicU64::new(0));
+        let mut log = Log::open_with_io(
+            &dir,
+            Box::new(CountingIo {
+                segment_syncs: Arc::clone(&segment_syncs),
+                checkpoint_syncs: Arc::clone(&checkpoint_syncs),
+            }),
+        )
+        .unwrap();
+        let offsets = log.append_group(&[b"one", b"two", b"three"]).unwrap();
+        assert_eq!(offsets, vec![Offset::ZERO, Offset::new(1), Offset::new(2)]);
+        assert_eq!(segment_syncs.load(Ordering::Relaxed), 1);
+        assert_eq!(checkpoint_syncs.load(Ordering::Relaxed), 1);
+        assert_eq!(log.durable_offset, Some(Offset::new(2)));
         fs::remove_dir_all(dir).unwrap();
     }
 
