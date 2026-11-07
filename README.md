@@ -1,5 +1,3 @@
-<img align="right" src="docs/assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="120">
-
 # Serapendiya
 
 **Make sense of every event.**
@@ -13,8 +11,6 @@ separate commercial products · **Built in:** Rust
 
 [Product vision](#product-vision) · [Current status](#current-status) ·
 [Roadmap](#roadmap-to-a-demonstrable-mvp) · [Investor narrative](docs/investor-pitch.md)
-
-<br clear="right">
 
 ## Product vision
 
