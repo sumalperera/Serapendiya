@@ -1,11 +1,13 @@
-<p align="center"><img src="assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="120"></p>
+<img align="right" src="assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="110">
 
-# Serapendiya — ideation-stage investor narrative
+# Serapendiya
 
-## One sentence
+**Investor narrative · Ideation stage**
 
 Serapendiya is a developer-first real-time data platform designed to make event
 systems easier to inspect, explain, replay, and eventually connect to analytics.
+
+<br clear="right">
 
 ## The problem
 

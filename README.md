@@ -1,20 +1,27 @@
-<p align="center"><img src="docs/assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="140"></p>
+<img align="right" src="docs/assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="120">
 
 # Serapendiya
 
-## A developer-first real-time data platform for understanding events from production to analytics
+**Make sense of every event.**
 
-Serapendiya is an ideation-stage open-source project exploring a simpler way
-to build, inspect, replay, and eventually materialise real-time event data.
+Serapendiya is an early-stage real-time data platform exploring a clearer way
+to build, inspect, and understand event-driven systems—from the event stream
+to future analytics workflows.
 
-> Event infrastructure should help developers understand what happened, why it
-> happened, and what they can safely do next—not just move bytes quickly.
+**Stage:** ideation and technical foundation · **Model:** open-source core with
+separate commercial products · **Built in:** Rust
+
+[Product vision](#product-vision) · [Current status](#current-status) ·
+[Roadmap](#roadmap-to-a-demonstrable-mvp) · [Investor narrative](docs/investor-pitch.md)
+
+<br clear="right">
+
+## Product vision
 
 ![Serapendiya platform vision](<Serapendiya Real-Time Data Platform.png>)
 
-The image above is a **product vision and investor discussion graphic**, not a
-claim that every illustrated capability is implemented. The current repository
-contains the foundational local storage work only.
+*Concept illustration: capabilities shown include planned features and do not
+represent the current product.*
 
 ## The opportunity
 
@@ -48,9 +55,9 @@ The open-source repository contains a G0 foundation and experimental G1 storage 
 - Fault-injection and process-level crash-recovery tests.
 - Derived sparse indexes, bounded group commit, and Linux Docker CI.
 
-G1 acceptance and durability guarantees remain under review. This is not yet a broker or production MVP. Kafka networking, real producers
-and consumers, queues, replay UX, and the end-to-end developer workflow remain
-future authorized gates.
+G1 acceptance and durability guarantees remain under review. The project is not
+yet a broker or production MVP. Kafka networking, real producers and consumers,
+queues, replay UX, and the end-to-end developer workflow remain future gates.
 
 ## Roadmap to a demonstrable MVP
 
