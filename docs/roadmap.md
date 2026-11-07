@@ -6,13 +6,13 @@ Serapendiya is not presented as production-ready software. The project has a
 working Rust foundation and an approved local-storage implementation, while the
 customer-facing streaming workflow is still ahead.
 
-### Completed open-source gates
+### Open-source work to date
 
 - G0: workspace, configuration, domain primitives, CLI skeleton, CI, ADRs, and
   provenance policy.
-- G1: local append storage, CRC validation, durable checkpoints, recovery,
+- G1 prototype: local append storage, CRC validation, checkpoints, recovery,
   derived indexes, bounded group commit, fault injection, crash harness, and
-  Docker/Linux verification.
+  Docker/Linux tests. G1 acceptance and crash-safety guarantees remain under review.
 
 ### Next authorized decision
 

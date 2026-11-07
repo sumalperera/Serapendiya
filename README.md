@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="140"></p>
+
 # Serapendiya
 
 ## A developer-first real-time data platform for understanding events from production to analytics
@@ -37,16 +39,16 @@ path from real-time events to useful analytical data.
 
 ## Current status
 
-The open-source repository has completed G0 and the approved G1 storage gate:
+The open-source repository contains a G0 foundation and experimental G1 storage work:
 
 - Rust workspace with `streamd` and `streamctl` entry points.
 - Strict configuration and foundational domain types.
 - Local append log with RecordBatch v2-shaped framing and CRC32C.
-- Durable checkpoints with certified-prefix recovery.
+- Checkpoint and certified-prefix recovery prototypes.
 - Fault-injection and process-level crash-recovery tests.
 - Derived sparse indexes, bounded group commit, and Linux Docker CI.
 
-This is not yet a broker or production MVP. Kafka networking, real producers
+G1 acceptance and durability guarantees remain under review. This is not yet a broker or production MVP. Kafka networking, real producers
 and consumers, queues, replay UX, and the end-to-end developer workflow remain
 future authorized gates.
 

@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/serapendiya-logo.png" alt="Serapendiya serpent logo" width="120"></p>
+
 # Serapendiya — ideation-stage investor narrative
 
 ## One sentence
@@ -56,8 +58,8 @@ The public repository currently demonstrates technical foundations rather than a
 complete product:
 
 - Rust implementation with locked dependencies and CI.
-- Crash-conscious append storage.
-- Certified durability boundaries and recovery behavior.
+- Experimental local append storage and checkpoint recovery.
+- Tests for selected durability and recovery scenarios.
 - Injected failure tests and a process-level crash harness.
 - Reproducible Linux Docker test path.
 
@@ -66,15 +68,16 @@ queue semantics, replay UX, production portability, or commercial modules.
 
 ## Path to the first credible demo
 
-The next product milestone is a narrow local workflow:
+A potential future product demonstration is a narrow local workflow:
 
 ```text
 publish → inspect → restart → recover
 ```
 
-After that, the product can be evaluated with real users before expanding into
-Kafka client compatibility, independent queues, replay preview, and analytical
-destinations.
+Its implementation is subject to the project's authorization gates. User
+research can proceed alongside technical review; Kafka client compatibility,
+independent queues, replay preview, and analytical destinations remain future
+work.
 
 ## Business model hypothesis
 
