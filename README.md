@@ -3,7 +3,7 @@
 **Make sense of every event.**
 
 Serapendiya is an early-stage real-time data platform exploring a clearer way
-to build, inspect, and understand event-driven systems—from the event stream
+to build, inspect, and understand event-driven systems-from the event stream
 to future analytics workflows.
 
 **Stage:** ideation and technical foundation · **Model:** open-source core with
