@@ -6,11 +6,10 @@ Serapendiya is an early-stage real-time data platform exploring a clearer way
 to build, inspect, and understand event-driven systems-from the event stream
 to future analytics workflows.
 
-**Stage:** ideation and technical foundation · **Model:** open-source core with
-separate commercial products · **Built in:** Rust
+**Stage:** early development · **License:** MIT · **Built in:** Rust
 
 [Product vision](#product-vision) · [Current status](#current-status) ·
-[Roadmap](#roadmap-to-a-demonstrable-mvp) · [Investor narrative](docs/investor-pitch.md)
+[Roadmap](#roadmap)
 
 ## Product vision
 
@@ -36,7 +35,6 @@ path from real-time events to useful analytical data.
 - Open-source streaming core for local development and self-hosting.
 - Developer tools for inspecting event history and explaining state.
 - Safe, explicit replay workflows rather than opaque operational actions.
-- Optional commercial capabilities in a separate private repository.
 - Eventual adapters for governed contracts and analytical destinations, only
   after the core workflow is proven.
 
@@ -55,7 +53,7 @@ G1 acceptance and durability guarantees remain under review. The project is not
 yet a broker or production MVP. Kafka networking, real producers and consumers,
 queues, replay UX, and the end-to-end developer workflow remain future gates.
 
-## Roadmap to a demonstrable MVP
+## Roadmap
 
 1. Finish and review G1 storage evidence.
 2. Obtain explicit authorization for G2 Kafka compatibility work.
@@ -66,17 +64,8 @@ queues, replay UX, and the end-to-end developer workflow remain future gates.
 6. Validate the workflow with real client and recovery tests before making
    production claims.
 
-The current investor-demo hypothesis is a focused “publish → inspect → restart
-→ recover” workflow. It is a target for the next authorized product gate, not
-an existing feature claim.
-
-## Open source and commercial tracks
-
-This repository is the public open-source track. Paid or proprietary features
-belong exclusively in the private
-[Serapendiya-commercial repository](https://github.com/sumalperera/Serapendiya-commercial.git).
-The repositories must remain separate in code, commits, release artifacts,
-credentials, and licensing claims.
+One planned development milestone is a “publish → inspect → restart → recover”
+workflow. It is a future goal, not an existing feature claim.
 
 ## Development checks
 
@@ -90,5 +79,4 @@ cargo test --workspace
 
 The Docker command requires Docker Desktop or a compatible Docker runtime.
 
-See [docs/investor-pitch.md](docs/investor-pitch.md) for the ideation-stage
-product narrative and [docs/roadmap.md](docs/roadmap.md) for delivery status.
+See [docs/roadmap.md](docs/roadmap.md) for delivery status.

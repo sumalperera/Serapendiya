@@ -28,9 +28,9 @@ wire implementation exists in this repository yet.
 
 These stages are sequencing gates, not delivery-date promises.
 
-## Investor-demo hypothesis
+## Planned end-to-end workflow
 
-The smallest compelling demonstration is:
+A future development milestone is:
 
 ```text
 publish event → inspect event → restart process → recover event
@@ -40,14 +40,3 @@ That workflow should be built and tested as a vertical slice only after the
 relevant gates are authorized. It must be presented as a prototype until client
 compatibility, recovery, security, and operational claims are independently
 verified.
-
-## Commercial separation
-
-Paid or proprietary features belong in:
-
-`https://github.com/sumalperera/Serapendiya-commercial`
-
-The public repository must not contain commercial implementation code,
-proprietary assets, entitlement checks, paid packaging, or private credentials.
-Any shared open-source component must be independently useful, MIT-compatible,
-and explicitly classified as open source before implementation.
