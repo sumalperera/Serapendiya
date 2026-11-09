@@ -1,14 +1,14 @@
 # Proposed amendment to ADR-004: initialize the durable boundary
 
-Status: **PROPOSED — experimental empty-checkpoint initialization implemented
-in the working tree; FORMAT marker and non-mutating classification are not.**
+Status: **PROPOSED — experimental empty-checkpoint initialization merged in
+PR #13; FORMAT marker and non-mutating classification are not implemented.**
 
 The 2026-11-09 founder instruction authorized proceeding with the storage work.
 The implementation initializes an empty checkpoint before accepting writes;
 the full protocol below remains unaccepted and lacks simulated power-loss and
 filesystem-matrix evidence. Later FORMAT-marker and directory-lock proposals
 are assessed in `ADR-003-checksum-and-recovery-review.md`, not implemented.
-The working tree now writes experimental checkpoint version 2, distinct from
+The prototype writes experimental checkpoint version 2, distinct from
 the legacy version 1, before accepting writes. A valid empty version-2 checkpoint
 allows an uncertified partial first frame to be truncated; a version-1 checkpoint
 is rejected without truncating the segment. Regression tests cover a one-byte
@@ -16,7 +16,7 @@ partial first append and legacy-checkpoint refusal. This is not the proposed
 FORMAT-marker or no-mutation-on-refusal protocol, and it has not been verified
 under power loss or accepted as a stable format.
 If initialization fails with `checkpoint.tmp` present but no durable
-checkpoint, the working tree now refuses to reopen instead of overwriting the
+checkpoint, the prototype refuses to reopen instead of overwriting the
 ambiguous temporary file. An operator procedure and an identity-based safe
 restart protocol remain to be designed.
 
@@ -30,8 +30,9 @@ protocol before retrying. An error does not mean the write is absent.
 A nonempty segment with no checkpoint is ambiguous: it might be the tail of an
 interrupted first append, or it might contain previously acknowledged records
 whose checkpoint is missing. Automatically truncating it can destroy acknowledged
-data. The current working tree fails closed, preserving the bytes, but cannot
-automatically recover the interrupted first-append case.
+data. The prototype fails closed if the checkpoint is missing. Its initialized
+version-2 checkpoint permits recovery from tested first-append interruptions,
+but initialization failures with ambiguous temporary files still fail closed.
 
 ## Proposed protocol
 
@@ -72,5 +73,6 @@ protocol does not claim detection of complete external deletion or storage loss.
 - Decide and document operator recovery for ambiguous and externally damaged
   directories, and whether automatic ancestor creation is supported.
 
-Founder approval is required before implementing this proposed durable
-initialization protocol.
+The complete initialization and classification protocol remains proposed; its
+format and acceptance requirements require review before they are treated as a
+stable durability contract.

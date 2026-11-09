@@ -1008,7 +1008,7 @@ mod tests {
 
     #[test]
     fn simulated_power_cut_preserves_acknowledged_prefix() {
-        for point in [
+        for (point, prior_count) in [
             "segment-write",
             "segment-partial",
             "segment-out-of-order",
@@ -1019,11 +1019,14 @@ mod tests {
             "checkpoint-rename",
             "rename-early-persistence",
             "directory-sync",
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|point| [(point, 0usize), (point, 3usize)])
+        {
             let dir = temp_dir();
             let mut initial = Log::open(&dir).unwrap();
             let acknowledged: [&[u8]; 3] = [b"first", b"second", b"third"];
-            for value in acknowledged {
+            for value in acknowledged.iter().take(prior_count) {
                 initial.append(value).unwrap();
             }
             drop(initial);
@@ -1043,7 +1046,7 @@ mod tests {
             fs::write(dir.join("checkpoint"), &disk.stable_checkpoint).unwrap();
             drop(disk);
             let mut recovered = Log::open(&dir).unwrap();
-            for (offset, value) in acknowledged.iter().enumerate() {
+            for (offset, value) in acknowledged.iter().take(prior_count).enumerate() {
                 assert_eq!(
                     recovered
                         .read_batch(Offset::new(offset as u64))
@@ -1054,7 +1057,9 @@ mod tests {
                     "point: {point}"
                 );
             }
-            let interrupted = recovered.read_batch(Offset::new(3)).unwrap();
+            let interrupted = recovered
+                .read_batch(Offset::new(prior_count as u64))
+                .unwrap();
             if matches!(point, "directory-sync" | "rename-early-persistence") {
                 assert_eq!(interrupted.unwrap().records, b"interrupted");
             } else {

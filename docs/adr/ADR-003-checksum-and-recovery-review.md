@@ -1,8 +1,8 @@
 # ADR-003/004 review: split checksums, versions and recovery
 
 Status: **PROPOSED alternatives; no decision or stable format.** The founder
-requested an engineering review of the 2026-11-09 proposal; the working-tree
-container is experimental and currently uses the earlier full-payload CRC.
+requested an engineering review of the 2026-11-09 proposal; the container
+merged in PR #13 is experimental and uses the earlier full-payload CRC.
 The safety changes in PR #12 are merged independently.
 
 ## Refined split-checksum candidate
@@ -64,7 +64,7 @@ coverage. A broker can stamp base offset and leader epoch without recomputing
 the Kafka CRC, assuming it does not change CRC-covered bytes. Source:
 https://kafka.apache.org/44/implementation/message-format/
 
-Candidate A keeps the working-tree container's separate full-batch CRC. It
+Candidate A keeps the prototype container's separate full-batch CRC. It
 adds a complete pass and covers the Kafka prefix and payload, in addition to
 Kafka's own CRC. Candidate B checksums the internal entry envelope plus Kafka's
 21-byte prefix, and verifies Kafka's CRC for the remaining bytes. A chain over
