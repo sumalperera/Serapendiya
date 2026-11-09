@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
     sync::atomic::{AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -64,12 +64,12 @@ impl StorageIo for CrashAtBoundary {
         self.after("checkpoint-sync");
         Ok(())
     }
-    fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
-        self.real.rename_checkpoint(temporary, final_path)?;
+    fn rename_checkpoint(&self, directory: &File) -> io::Result<()> {
+        self.real.rename_checkpoint(directory)?;
         self.after("checkpoint-rename");
         Ok(())
     }
-    fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+    fn sync_directory(&self, directory: &File) -> io::Result<()> {
         self.real.sync_directory(directory)?;
         self.after("directory-sync");
         Ok(())
@@ -101,11 +101,11 @@ impl StorageIo for CrashAfterSecondSegmentSync {
         self.real.sync_checkpoint(file)
     }
 
-    fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
-        self.real.rename_checkpoint(temporary, final_path)
+    fn rename_checkpoint(&self, directory: &File) -> io::Result<()> {
+        self.real.rename_checkpoint(directory)
     }
 
-    fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+    fn sync_directory(&self, directory: &File) -> io::Result<()> {
         self.real.sync_directory(directory)
     }
 }

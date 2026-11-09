@@ -7,15 +7,17 @@
 
 use std::{
     convert::TryInto,
-    fs::{self, File, OpenOptions},
+    fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use crate::{
     domain::Offset,
     error::{Error, Result},
 };
+#[cfg(unix)]
+use rustix::fs::{self as rfs, Dir, Mode, OFlags};
 
 const MAGIC: &[u8; 4] = b"SRLG";
 // Version 2 identifies the experimental container. Version 1 was used by the
@@ -33,7 +35,7 @@ const MAX_GROUP_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Debug)]
 pub struct Log {
     _lock: File,
-    directory: PathBuf,
+    directory: File,
     segment: File,
     io: Box<dyn StorageIo>,
     certified_len: u64,
@@ -82,8 +84,8 @@ pub trait StorageIo: Send + Sync + std::fmt::Debug {
     fn truncate_segment(&self, file: &File, length: u64) -> io::Result<()>;
     fn write_checkpoint(&self, file: &mut File, bytes: &[u8]) -> io::Result<()>;
     fn sync_checkpoint(&self, file: &File) -> io::Result<()>;
-    fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()>;
-    fn sync_directory(&self, directory: &Path) -> io::Result<()>;
+    fn rename_checkpoint(&self, directory: &File) -> io::Result<()>;
+    fn sync_directory(&self, directory: &File) -> io::Result<()>;
 }
 
 #[derive(Debug, Default)]
@@ -110,12 +112,12 @@ impl StorageIo for RealStorageIo {
         file.sync_all()
     }
 
-    fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
-        fs::rename(temporary, final_path)
+    fn rename_checkpoint(&self, directory: &File) -> io::Result<()> {
+        rename_checkpoint_at(directory)
     }
 
-    fn sync_directory(&self, directory: &Path) -> io::Result<()> {
-        File::open(directory)?.sync_all()
+    fn sync_directory(&self, directory: &File) -> io::Result<()> {
+        directory.sync_all()
     }
 }
 
@@ -132,45 +134,46 @@ impl Log {
     }
 
     pub fn open_with_io(directory: impl AsRef<Path>, io: Box<dyn StorageIo>) -> Result<Self> {
-        let directory = directory.as_ref().to_owned();
-        if let Ok(metadata) = fs::symlink_metadata(&directory) {
-            if !metadata.file_type().is_dir() {
+        let directory = open_data_directory(directory.as_ref())?;
+        // The directory lock serializes classification with other new binaries;
+        // the lock file also fences older binaries that only lock that file.
+        lock_directory(&directory)?;
+        let empty = validate_directory_entries(&directory)?;
+        if empty {
+            sync_directory_ancestors(&directory)?;
+        }
+        let (lock, new_lock) = match open_child(&directory, ".lock", false, false) {
+            Ok(file) => (file, false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound && empty => {
+                (open_child(&directory, ".lock", true, true)?, true)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Err(Error::InvalidCheckpoint(
-                    "data directory is not a real directory".into(),
+                    "unrecognized directory without a lock file; data preserved".into(),
                 ));
             }
-        }
-        fs::create_dir_all(&directory)?;
-        let empty = validate_directory_entries(&directory)?;
-        let lock_path = directory.join(".lock");
-        let lock_exists = lock_path.try_exists()?;
-        if !lock_exists && !empty {
-            return Err(Error::InvalidCheckpoint(
-                "unrecognized directory without a lock file; data preserved".into(),
-            ));
-        }
-        // Sync every ancestor so newly created directory entries are durable too.
-        let canonical_directory = fs::canonicalize(&directory)?;
-        for ancestor in canonical_directory.ancestors() {
-            File::open(ancestor)?.sync_all()?;
-        }
-        let mut lock_options = OpenOptions::new();
-        lock_options.write(true);
-        if !lock_exists {
-            lock_options.create_new(true);
-        }
-        let lock = lock_options.open(lock_path)?;
+            Err(error) => return Err(error.into()),
+        };
         lock_directory(&lock)?;
         validate_directory_entries(&directory)?;
-        let checkpoint_path = directory.join("checkpoint");
-        let checkpoint_exists = checkpoint_path.exists();
-        if !checkpoint_exists && directory.join("checkpoint.tmp").try_exists()? {
+        let checkpoint_file = open_child(&directory, "checkpoint", false, false);
+        let checkpoint_exists = match &checkpoint_file {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(io::Error::new(error.kind(), error.to_string()).into()),
+        };
+        if !checkpoint_exists && !new_lock {
+            return Err(Error::InvalidCheckpoint(
+                "directory lacks a durable checkpoint; data preserved".into(),
+            ));
+        }
+        if !checkpoint_exists && child_exists(&directory, "checkpoint.tmp")? {
             return Err(Error::InvalidCheckpoint(
                 "uncommitted checkpoint without durable identity; data preserved".into(),
             ));
         }
         let checkpoint = if checkpoint_exists {
-            read_checkpoint(&checkpoint_path)?
+            read_checkpoint(checkpoint_file?)?
         } else {
             Checkpoint {
                 certified_len: 0,
@@ -179,13 +182,12 @@ impl Log {
             }
         };
 
-        let segment_path = directory.join("segment-000000.log");
-        let mut segment = OpenOptions::new()
-            .create(!checkpoint_exists)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&segment_path)?;
+        let mut segment = open_child(
+            &directory,
+            "segment-000000.log",
+            !checkpoint_exists,
+            !checkpoint_exists,
+        )?;
         let actual_len = segment.metadata()?.len();
         if !checkpoint_exists && actual_len > 0 {
             return Err(Error::InvalidCheckpoint(
@@ -258,6 +260,11 @@ impl Log {
         }
         if batches.is_empty() {
             return Ok(Vec::new());
+        }
+        if child_exists(&self.directory, "checkpoint.tmp")? {
+            return Err(Error::InvalidCheckpoint(
+                "stale checkpoint.tmp requires operator inspection; data preserved".into(),
+            ));
         }
         if batches.len() > MAX_GROUP_BATCHES {
             return Err(Error::InvalidBatch(
@@ -423,16 +430,116 @@ impl Log {
     }
 }
 
-fn validate_directory_entries(directory: &Path) -> Result<bool> {
+#[cfg(unix)]
+fn open_data_directory(path: &Path) -> io::Result<File> {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    match rfs::open(path, flags, Mode::empty()) {
+        Ok(fd) => Ok(File::from(fd)),
+        Err(rustix::io::Errno::NOENT) => {
+            let parent = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let name = path.file_name().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "invalid data directory")
+            })?;
+            let parent =
+                File::from(rfs::open(parent, flags, Mode::empty()).map_err(io::Error::from)?);
+            match rfs::mkdirat(&parent, name, Mode::RWXU) {
+                Ok(()) => parent.sync_all()?,
+                Err(rustix::io::Errno::EXIST) => {}
+                Err(error) => return Err(error.into()),
+            }
+            Ok(File::from(
+                rfs::openat(&parent, name, flags, Mode::empty()).map_err(io::Error::from)?,
+            ))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+// Only initialization needs to establish durable ancestor entries. Walk via
+// directory descriptors, so a path rename cannot redirect the traversal.
+#[cfg(unix)]
+fn sync_directory_ancestors(directory: &File) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut current = directory.try_clone()?;
+    loop {
+        current.sync_all()?;
+        let here = current.metadata()?;
+        let parent =
+            File::from(rfs::openat(&current, "..", flags, Mode::empty()).map_err(io::Error::from)?);
+        let above = parent.metadata()?;
+        if (here.dev(), here.ino()) == (above.dev(), above.ino()) {
+            return Ok(());
+        }
+        current = parent;
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_directory_ancestors(_directory: &File) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory safety requires Unix",
+    ))
+}
+
+#[cfg(unix)]
+fn open_child(directory: &File, name: &str, create: bool, exclusive: bool) -> io::Result<File> {
+    let mut flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+    if create {
+        flags |= OFlags::CREATE;
+    }
+    if exclusive {
+        flags |= OFlags::EXCL;
+    }
+    let file = File::from(
+        rfs::openat(directory, name, flags, Mode::RUSR | Mode::WUSR).map_err(io::Error::from)?,
+    );
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.nlink() != 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "storage entry is not a singly linked regular file",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn child_exists(directory: &File, name: &str) -> io::Result<bool> {
+    match rfs::statat(directory, name, rfs::AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(_) => Ok(true),
+        Err(rustix::io::Errno::NOENT) => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(unix)]
+fn rename_checkpoint_at(directory: &File) -> io::Result<()> {
+    rfs::renameat(directory, "checkpoint.tmp", directory, "checkpoint").map_err(io::Error::from)
+}
+
+#[cfg(unix)]
+fn validate_directory_entries(directory: &File) -> Result<bool> {
     let mut empty = true;
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        empty = false;
+    let entries = Dir::read_from(directory).map_err(io::Error::from)?;
+    for entry in entries {
+        let entry = entry.map_err(io::Error::from)?;
         let name = entry.file_name();
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+        empty = false;
+        let stat = rfs::statat(directory, name, rfs::AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(io::Error::from)?;
         if !matches!(
-            name.to_str(),
-            Some(".lock" | "checkpoint" | "checkpoint.tmp" | "segment-000000.log")
-        ) || !entry.file_type()?.is_file()
+            name.to_bytes(),
+            b".lock" | b"checkpoint" | b"checkpoint.tmp" | b"segment-000000.log"
+        ) || rfs::FileType::from_raw_mode(stat.st_mode) != rfs::FileType::RegularFile
         {
             return Err(Error::InvalidCheckpoint(
                 "unrecognized directory entry; data preserved".into(),
@@ -440,6 +547,39 @@ fn validate_directory_entries(directory: &Path) -> Result<bool> {
         }
     }
     Ok(empty)
+}
+
+#[cfg(not(unix))]
+fn open_data_directory(_path: &Path) -> io::Result<File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory safety requires Unix",
+    ))
+}
+#[cfg(not(unix))]
+fn open_child(_directory: &File, _name: &str, _create: bool, _exclusive: bool) -> io::Result<File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory safety requires Unix",
+    ))
+}
+#[cfg(not(unix))]
+fn child_exists(_directory: &File, _name: &str) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory safety requires Unix",
+    ))
+}
+#[cfg(not(unix))]
+fn rename_checkpoint_at(_directory: &File) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory safety requires Unix",
+    ))
+}
+#[cfg(not(unix))]
+fn validate_directory_entries(_directory: &File) -> Result<bool> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "directory safety requires Unix").into())
 }
 
 #[cfg(unix)]
@@ -721,8 +861,10 @@ fn certified_io(position: u64, error: io::Error) -> Error {
     }
 }
 
-fn read_checkpoint(path: &Path) -> Result<Checkpoint> {
-    let bytes = fs::read(path)?;
+fn read_checkpoint(file: File) -> Result<Checkpoint> {
+    let mut bytes = Vec::new();
+    file.take((CHECKPOINT_LEN + 1) as u64)
+        .read_to_end(&mut bytes)?;
     if bytes.len() != CHECKPOINT_LEN || &bytes[..4] != MAGIC || bytes[4] != CHECKPOINT_VERSION {
         return Err(Error::InvalidCheckpoint("bad header or length".into()));
     }
@@ -741,7 +883,7 @@ fn read_checkpoint(path: &Path) -> Result<Checkpoint> {
 }
 
 fn write_checkpoint(
-    directory: &Path,
+    directory: &File,
     checkpoint: Checkpoint,
     io: &dyn StorageIo,
 ) -> io::Result<()> {
@@ -754,16 +896,10 @@ fn write_checkpoint(
     let checksum = crc32c(&bytes[..32]);
     bytes[32..36].copy_from_slice(&checksum.to_be_bytes());
 
-    let temporary = directory.join("checkpoint.tmp");
-    let final_path = directory.join("checkpoint");
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temporary)?;
+    let mut file = open_child(directory, "checkpoint.tmp", true, true)?;
     io.write_checkpoint(&mut file, &bytes)?;
     io.sync_checkpoint(&file)?;
-    io.rename_checkpoint(&temporary, &final_path)?;
+    io.rename_checkpoint(directory)?;
     io.sync_directory(directory)?;
     Ok(())
 }
@@ -782,6 +918,10 @@ fn crc32c(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs::{self, OpenOptions},
+        path::PathBuf,
+    };
     use std::{
         sync::Arc,
         sync::atomic::{AtomicU64, Ordering},
@@ -852,19 +992,19 @@ mod tests {
             }
         }
 
-        fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
+        fn rename_checkpoint(&self, directory: &File) -> io::Result<()> {
             if matches!(self.point, FailurePoint::CheckpointRename) {
                 Err(Self::error(self.point))
             } else {
-                fs::rename(temporary, final_path)
+                RealStorageIo.rename_checkpoint(directory)
             }
         }
 
-        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+        fn sync_directory(&self, directory: &File) -> io::Result<()> {
             if matches!(self.point, FailurePoint::DirectorySync) {
                 Err(Self::error(self.point))
             } else {
-                File::open(directory)?.sync_all()
+                directory.sync_all()
             }
         }
     }
@@ -941,8 +1081,8 @@ mod tests {
             drop(disk);
             self.stop("checkpoint-sync")
         }
-        fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
-            fs::rename(temporary, final_path)?;
+        fn rename_checkpoint(&self, directory: &File) -> io::Result<()> {
+            RealStorageIo.rename_checkpoint(directory)?;
             let mut disk = self.0.lock().unwrap();
             if disk.stop_after == "rename-early-persistence" {
                 disk.stable_checkpoint = disk.synced_temporary.take().unwrap();
@@ -951,8 +1091,8 @@ mod tests {
             drop(disk);
             self.stop("checkpoint-rename")
         }
-        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
-            File::open(directory)?.sync_all()?;
+        fn sync_directory(&self, directory: &File) -> io::Result<()> {
+            directory.sync_all()?;
             let mut disk = self.0.lock().unwrap();
             disk.stable_checkpoint = disk.synced_temporary.take().unwrap();
             drop(disk);
@@ -983,11 +1123,11 @@ mod tests {
             RealStorageIo.sync_checkpoint(file)
         }
 
-        fn rename_checkpoint(&self, temporary: &Path, final_path: &Path) -> io::Result<()> {
-            RealStorageIo.rename_checkpoint(temporary, final_path)
+        fn rename_checkpoint(&self, directory: &File) -> io::Result<()> {
+            RealStorageIo.rename_checkpoint(directory)
         }
 
-        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+        fn sync_directory(&self, directory: &File) -> io::Result<()> {
             RealStorageIo.sync_directory(directory)
         }
     }
@@ -1070,6 +1210,93 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn operations_stay_with_open_directory_after_path_replacement() {
+        let dir = temp_dir();
+        let moved = dir.with_extension("moved");
+        let mut log = Log::open(&dir).unwrap();
+        fs::rename(&dir, &moved).unwrap();
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("sentinel"), b"untouched").unwrap();
+        assert_eq!(log.append(b"record").unwrap(), Offset::ZERO);
+        assert_eq!(fs::read(dir.join("sentinel")).unwrap(), b"untouched");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        drop(log);
+        assert_eq!(
+            Log::open(&moved)
+                .unwrap()
+                .read_batch(Offset::ZERO)
+                .unwrap()
+                .unwrap()
+                .records,
+            b"record"
+        );
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(moved).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_hard_linked_segment_without_modifying_target() {
+        let dir = temp_dir();
+        drop(Log::open(&dir).unwrap());
+        let segment = dir.join("segment-000000.log");
+        let external = dir.with_extension("external");
+        fs::remove_file(&segment).unwrap();
+        fs::write(&external, b"outside").unwrap();
+        fs::hard_link(&external, &segment).unwrap();
+        assert!(Log::open(&dir).is_err());
+        assert_eq!(fs::read(&external).unwrap(), b"outside");
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_file(external).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_temporary_is_preserved_and_prevents_append() {
+        let dir = temp_dir();
+        let mut log = Log::open(&dir).unwrap();
+        fs::write(dir.join("checkpoint.tmp"), b"preserve").unwrap();
+        assert!(log.append(b"not-written").is_err());
+        assert_eq!(fs::read(dir.join("checkpoint.tmp")).unwrap(), b"preserve");
+        assert_eq!(
+            fs::metadata(dir.join("segment-000000.log")).unwrap().len(),
+            0
+        );
+        drop(log);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_empty_openers_have_one_owner() {
+        use std::sync::{Barrier, mpsc};
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let start = Arc::new(Barrier::new(9));
+        let finish = Arc::new(Barrier::new(9));
+        let (tx, rx) = mpsc::channel();
+        let mut threads = Vec::new();
+        for _ in 0..8 {
+            let (dir, start, finish, tx) = (dir.clone(), start.clone(), finish.clone(), tx.clone());
+            threads.push(std::thread::spawn(move || {
+                start.wait();
+                let log = Log::open(dir);
+                tx.send(log.is_ok()).unwrap();
+                finish.wait();
+                drop(log);
+            }));
+        }
+        start.wait();
+        assert_eq!((0..8).filter(|_| rx.recv().unwrap()).count(), 1);
+        finish.wait();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn read_io_errors_are_not_misreported_as_corruption() {
         assert!(matches!(
@@ -1093,10 +1320,10 @@ mod tests {
             let dir = temp_dir();
             assert!(Log::open_with_io(&dir, Box::new(FaultIo { point })).is_err());
             let temporary = dir.join("checkpoint.tmp");
-            if temporary.exists() && !dir.join("checkpoint").exists() {
-                let before = fs::read(&temporary).unwrap();
+            if !dir.join("checkpoint").exists() {
+                let before = fs::read(&temporary).ok();
                 assert!(Log::open(&dir).is_err());
-                assert_eq!(fs::read(&temporary).unwrap(), before);
+                assert_eq!(fs::read(&temporary).ok(), before);
             } else {
                 let mut log = Log::open(&dir).unwrap();
                 assert_eq!(log.append(b"first").unwrap(), Offset::ZERO);
@@ -1231,7 +1458,7 @@ mod tests {
         let original = encode_batch(Offset::ZERO, (FIXED_BATCH_REMAINDER + 3) as i32, b"old");
         fs::write(dir.join("segment-000000.log"), &original).unwrap();
         write_checkpoint(
-            &dir,
+            &File::open(&dir).unwrap(),
             Checkpoint {
                 certified_len: original.len() as u64,
                 next_offset: Offset::new(1),
@@ -1584,7 +1811,7 @@ mod tests {
             (log.certified_len(), 1)
         };
         write_checkpoint(
-            &dir,
+            &File::open(&dir).unwrap(),
             Checkpoint {
                 certified_len,
                 next_offset: Offset::new(9),
@@ -1609,7 +1836,7 @@ mod tests {
             (log.certified_len(), 1)
         };
         write_checkpoint(
-            &dir,
+            &File::open(&dir).unwrap(),
             Checkpoint {
                 certified_len: certified_len - 1,
                 next_offset: Offset::ZERO,
