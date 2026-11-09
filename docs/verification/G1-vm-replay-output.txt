@@ -1,0 +1,189 @@
+
+running 1 test
+test generate_trace ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+=== REPLAY acknowledged ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57265).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65521).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 15/65536 files (0.0% non-contiguous), 8271/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY segment-write ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57265).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65521).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 15/65536 files (0.0% non-contiguous), 8271/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY segment-sync ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57265).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65521).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 15/65536 files (0.0% non-contiguous), 8271/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY checkpoint-write ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57265).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65521).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 15/65536 files (0.0% non-contiguous), 8271/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY checkpoint-sync ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57264).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65520).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 16/65536 files (0.0% non-contiguous), 8272/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY checkpoint-rename ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57264).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65520).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 16/65536 files (0.0% non-contiguous), 8272/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY directory-sync ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57265).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65521).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 15/65536 files (0.0% non-contiguous), 8271/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+=== REPLAY second-ack ===
+e2fsck 1.47.0 (5-Feb-2023)
+/dev/loop0: recovering journal
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong (57268, counted=57265).
+Fix? yes
+
+Free inodes count wrong (65525, counted=65521).
+Fix? yes
+
+
+/dev/loop0: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop0: 15/65536 files (0.0% non-contiguous), 8271/65536 blocks
+
+running 1 test
+test verify_replay ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
