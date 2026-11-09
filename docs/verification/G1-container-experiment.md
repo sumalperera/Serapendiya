@@ -1,9 +1,9 @@
 # G1 container experiment verification
 
-Status: **UNVERIFIED for G1 acceptance and production use.** The work described
-here is uncommitted on `g1-versioned-batch-container`, based on safety commit
-`a2dcf97621e2b41e89596fa77996a8893566ab68`. PR #12 containing that safety
-commit has been merged. The experiment changes the on-disk checkpoint version
+Status: **UNVERIFIED for G1 acceptance and production use.** The experiment was
+merged in PR #13, with code commit `6a845e5762b4f7b610e47609f58496ce78f06ec1`.
+PR #12 containing safety commit `a2dcf97621e2b41e89596fa77996a8893566ab68`
+was merged previously. The experiment changes the on-disk checkpoint version
 and segment frame; legacy version-1 checkpoints are refused, not migrated.
 
 On 2026-11-09, with Rust `1.99.1` and lockfile SHA-256
@@ -16,9 +16,11 @@ exited 0. Its Dockerfile ran `cargo build --locked`, `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets -- -D warnings` and
 `cargo test --workspace`. The temporary image was removed. The Docker run
 included the unknown-flag and expanded simulated-failure tests.
-After that Docker run, a local-only change added fail-closed handling and a test
-for an ambiguous `checkpoint.tmp` without a durable checkpoint. Linux CI has
-not yet verified that later change.
+After that Docker run, a change added fail-closed handling and a test for an
+ambiguous `checkpoint.tmp` without a durable checkpoint. The G0 and Linux Docker
+G1 jobs passed for the PR commit in
+[GitHub Actions run 42560362950](https://github.com/sumalperera/Serapendiya/actions/runs/42560362950).
+That result does not verify later changes made after the PR commit.
 
 Coverage includes independent kafka-python 3.0.13 fixtures for two narrow
 single-record batches; malformed record lengths; header corruption; legacy

@@ -5,7 +5,7 @@ Status: **PROPOSED — experimental implementation in progress; not accepted.**
 **Review update:** The split-coverage checksum and versioning alternative in
 [`ADR-003-checksum-and-recovery-review.md`](ADR-003-checksum-and-recovery-review.md)
 is now under consideration. Neither checksum layout is accepted or stable. The
-working-tree code implements the full-payload-checksum candidate below, not the
+prototype merged in PR #13 implements the full-payload-checksum candidate below, not the
 new alternative. Do not claim an operator-safe legacy classification or
 production-readiness for either design.
 
