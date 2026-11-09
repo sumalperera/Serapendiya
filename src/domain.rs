@@ -16,6 +16,8 @@ impl FromStr for StreamName {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let valid = !value.is_empty()
+            && value != "."
+            && value != ".."
             && value.len() <= 249
             && value
                 .bytes()
@@ -74,6 +76,8 @@ mod tests {
         assert!("orders.v1".parse::<StreamName>().is_ok());
         assert!("".parse::<StreamName>().is_err());
         assert!("orders/one".parse::<StreamName>().is_err());
+        assert!(".".parse::<StreamName>().is_err());
+        assert!("..".parse::<StreamName>().is_err());
     }
 
     #[test]
