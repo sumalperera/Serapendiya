@@ -23,9 +23,12 @@ const HEADER_LEN: usize = 61;
 const FIXED_BATCH_REMAINDER: usize = 49;
 const CHECKPOINT_LEN: usize = 36;
 const INDEX_STRIDE: u64 = 16;
+const MAX_GROUP_BATCHES: usize = 1024;
+const MAX_GROUP_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct Log {
+    _lock: File,
     directory: PathBuf,
     segment: File,
     io: Box<dyn StorageIo>,
@@ -127,6 +130,17 @@ impl Log {
     pub fn open_with_io(directory: impl AsRef<Path>, io: Box<dyn StorageIo>) -> Result<Self> {
         let directory = directory.as_ref().to_owned();
         fs::create_dir_all(&directory)?;
+        // Sync every ancestor so newly created directory entries are durable too.
+        let canonical_directory = fs::canonicalize(&directory)?;
+        for ancestor in canonical_directory.ancestors() {
+            File::open(ancestor)?.sync_all()?;
+        }
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(directory.join(".lock"))?;
+        lock_directory(&lock)?;
         let checkpoint_path = directory.join("checkpoint");
         let checkpoint = if checkpoint_path.exists() {
             read_checkpoint(&checkpoint_path)?
@@ -146,6 +160,11 @@ impl Log {
             .write(true)
             .open(&segment_path)?;
         let actual_len = segment.metadata()?.len();
+        if !checkpoint_path.exists() && actual_len > 0 {
+            return Err(Error::InvalidCheckpoint(
+                "checkpoint is missing for a nonempty segment".into(),
+            ));
+        }
         if checkpoint.certified_len > actual_len {
             return Err(Error::InvalidCheckpoint(
                 "certified length exceeds segment length".into(),
@@ -159,6 +178,7 @@ impl Log {
         segment.seek(SeekFrom::End(0))?;
         let durable_offset = checkpoint.next_offset.get().checked_sub(1).map(Offset::new);
         Ok(Self {
+            _lock: lock,
             directory,
             segment,
             io,
@@ -188,6 +208,22 @@ impl Log {
         if batches.is_empty() {
             return Ok(Vec::new());
         }
+        if batches.len() > MAX_GROUP_BATCHES {
+            return Err(Error::InvalidBatch(
+                "group batch count limit exceeded".into(),
+            ));
+        }
+
+        let mut group_len = 0usize;
+        for records in batches {
+            group_len = group_len
+                .checked_add(HEADER_LEN)
+                .and_then(|length| length.checked_add(records.len()))
+                .ok_or_else(|| Error::InvalidBatch("group length overflow".into()))?;
+            if group_len > MAX_GROUP_BYTES {
+                return Err(Error::InvalidBatch("group byte limit exceeded".into()));
+            }
+        }
 
         let mut next_offset = self.next_offset;
         let mut offsets = Vec::with_capacity(batches.len());
@@ -201,6 +237,11 @@ impl Log {
                 .try_into()
                 .map_err(|_| Error::InvalidBatch("batch exceeds signed 32-bit length".into()))?;
             let base_offset = next_offset;
+            if base_offset.get() > i64::MAX as u64 {
+                return Err(Error::InvalidBatch(
+                    "offset exceeds signed 64-bit range".into(),
+                ));
+            }
             let frame = encode_batch(base_offset, batch_length_i32, records);
             total_len = total_len
                 .checked_add(frame.len())
@@ -331,6 +372,32 @@ impl Log {
         }
         Ok(None)
     }
+}
+
+#[cfg(unix)]
+fn lock_directory(file: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    const LOCK_EX: i32 = 2;
+    const LOCK_NB: i32 = 4;
+    // The descriptor belongs to this live File. The OS releases the lock when
+    // the File is dropped; the lock file itself must never be unlinked in use.
+    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_directory(_file: &File) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory locking is only supported on Unix",
+    ))
 }
 
 fn encode_batch(base_offset: Offset, batch_length: i32, records: &[u8]) -> Vec<u8> {
@@ -665,6 +732,55 @@ mod tests {
     #[test]
     fn crc32c_known_vector() {
         assert_eq!(crc32c(b"123456789"), 0xe3069283);
+    }
+
+    #[test]
+    fn refuses_second_handle_until_first_is_dropped() {
+        let dir = temp_dir();
+        let mut first = Log::open(&dir).unwrap();
+        first.append(b"first").unwrap();
+        assert!(Log::open(&dir).is_err());
+        drop(first);
+        let mut reopened = Log::open(&dir).unwrap();
+        assert_eq!(
+            reopened.read_batch(Offset::ZERO).unwrap().unwrap().records,
+            b"first"
+        );
+        drop(reopened);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_checkpoint_never_truncates_nonempty_segment() {
+        let dir = temp_dir();
+        let mut log = Log::open(&dir).unwrap();
+        log.append(b"certified").unwrap();
+        drop(log);
+        fs::remove_file(dir.join("checkpoint")).unwrap();
+        let segment = dir.join("segment-000000.log");
+        let original = fs::read(&segment).unwrap();
+        assert!(matches!(Log::open(&dir), Err(Error::InvalidCheckpoint(_))));
+        assert_eq!(fs::read(segment).unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_oversized_groups_and_unrepresentable_offsets() {
+        let dir = temp_dir();
+        let mut log = Log::open(&dir).unwrap();
+        assert!(matches!(
+            log.append_group(&vec![&b""[..]; MAX_GROUP_BATCHES + 1]),
+            Err(Error::InvalidBatch(_))
+        ));
+        assert!(matches!(
+            log.append(&vec![0; MAX_GROUP_BYTES]),
+            Err(Error::InvalidBatch(_))
+        ));
+        log.next_offset = Offset::new(i64::MAX as u64 + 1);
+        assert!(matches!(log.append(b"x"), Err(Error::InvalidBatch(_))));
+        assert_eq!(log.certified_len(), 0);
+        drop(log);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
