@@ -20,6 +20,7 @@ path = "src/bin/streamctl.rs"
 
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
+rustix = { version = "=1.1.6", features = ["fs"] }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.17"
 toml = "0.9.8"
