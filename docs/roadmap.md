@@ -16,6 +16,22 @@ customer-facing streaming workflow is still ahead.
 
 ### Next authorized decision
 
+The founder has selected a Redpanda-inspired direction: Kafka-compatible
+behavior at the client boundary and an original, versioned Serapendiya storage
+container. The concrete format and migration are proposed in
+[the ADR-003 amendment](adr/ADR-003-hybrid-storage-proposal.md); an experimental
+implementation is in progress and must be reviewed with the
+[ADR-004 initialization proposal](adr/ADR-004-initialization-proposal.md).
+PR #12's G1 safety fixes have been merged. G1 acceptance is still open.
+The competing checksum and versioning options are assessed in the
+[storage recovery review](adr/ADR-003-checksum-and-recovery-review.md).
+The [ADR-005 proposal](adr/ADR-005-shard-ownership-proposal.md) records future
+shard ownership, backpressure and benchmarking questions without authorizing
+partition actors, a runtime change or replication.
+The [agent trust-model proposal](adr/ADR-023-agent-trust-model-proposal.md)
+records future identity, authorization and uncertain-publish requirements;
+it does not authorize agent-facing features in G1.
+
 G2 Kafka compatibility requires explicit authorization. It must remain a narrow,
 tested subset with honest unsupported errors and real client evidence. No Kafka
 wire implementation exists in this repository yet.

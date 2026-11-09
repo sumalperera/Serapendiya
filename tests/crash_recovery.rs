@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicUsize, Ordering},
@@ -23,11 +23,12 @@ struct CrashAtBoundary {
     real: RealStorageIo,
     boundary: String,
     calls: AtomicUsize,
+    crash_on: usize,
 }
 
 impl CrashAtBoundary {
     fn after(&self, boundary: &str) {
-        if self.boundary == boundary && self.calls.fetch_add(1, Ordering::SeqCst) == 1 {
+        if self.boundary == boundary && self.calls.fetch_add(1, Ordering::SeqCst) == self.crash_on {
             std::process::abort();
         }
     }
@@ -35,6 +36,12 @@ impl CrashAtBoundary {
 
 impl StorageIo for CrashAtBoundary {
     fn write_segment(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        if self.boundary == "segment-partial-write"
+            && self.calls.fetch_add(1, Ordering::SeqCst) == self.crash_on
+        {
+            file.write_all(&bytes[..1])?;
+            std::process::abort();
+        }
         self.real.write_segment(file, bytes)?;
         self.after("segment-write");
         Ok(())
@@ -142,18 +149,68 @@ fn boundary_crash_child() {
         return;
     };
     let boundary = std::env::var("SERAPENDIYA_BOUNDARY").unwrap();
+    let first_append = std::env::var_os("SERAPENDIYA_FIRST_APPEND").is_some();
+    // Establish an empty checkpoint before instrumenting append boundaries.
+    drop(Log::open(PathBuf::from(&directory)).unwrap());
     let mut log = Log::open_with_io(
         PathBuf::from(directory),
         Box::new(CrashAtBoundary {
             real: RealStorageIo,
             boundary,
             calls: AtomicUsize::new(0),
+            crash_on: if first_append { 0 } else { 1 },
         }),
     )
     .unwrap();
+    if first_append {
+        let _ = log.append(b"interrupted");
+        panic!("requested first-append crash boundary was not reached");
+    }
     log.append(b"acknowledged").unwrap();
     let _ = log.append(b"interrupted");
     panic!("requested crash boundary was not reached");
+}
+
+#[test]
+fn first_append_process_abort_recovers_from_initialized_checkpoint() {
+    for boundary in [
+        "segment-partial-write",
+        "segment-write",
+        "segment-sync",
+        "checkpoint-write",
+        "checkpoint-sync",
+        "checkpoint-rename",
+        "directory-sync",
+    ] {
+        let directory = temp_dir();
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "boundary_crash_child"])
+            .env("SERAPENDIYA_BOUNDARY_DIR", &directory)
+            .env("SERAPENDIYA_BOUNDARY", boundary)
+            .env("SERAPENDIYA_FIRST_APPEND", "1")
+            .status()
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(status.signal(), Some(6), "boundary: {boundary}");
+        }
+        #[cfg(not(unix))]
+        assert!(!status.success(), "boundary: {boundary}");
+        let mut log = Log::open(&directory).unwrap();
+        let first = log.read_batch(Offset::ZERO).unwrap();
+        if matches!(boundary, "checkpoint-rename" | "directory-sync") {
+            assert_eq!(
+                first.unwrap().records,
+                b"interrupted",
+                "boundary: {boundary}"
+            );
+        } else {
+            assert_eq!(first, None, "boundary: {boundary}");
+        }
+        drop(log);
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 #[test]
@@ -206,6 +263,7 @@ fn crash_child() {
     let Some(directory) = std::env::var_os("SERAPENDIYA_CRASH_CHILD") else {
         return;
     };
+    drop(Log::open(PathBuf::from(&directory)).unwrap());
     let mut log = Log::open_with_io(
         PathBuf::from(directory),
         Box::new(CrashAfterSecondSegmentSync {

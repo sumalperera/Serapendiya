@@ -1,6 +1,29 @@
 # Proposed amendment to ADR-004: initialize the durable boundary
 
-Status: **PROPOSED — founder review required; not implemented or accepted.**
+Status: **PROPOSED — experimental empty-checkpoint initialization implemented
+in the working tree; FORMAT marker and non-mutating classification are not.**
+
+The 2026-11-09 founder instruction authorized proceeding with the storage work.
+The implementation initializes an empty checkpoint before accepting writes;
+the full protocol below remains unaccepted and lacks simulated power-loss and
+filesystem-matrix evidence. Later FORMAT-marker and directory-lock proposals
+are assessed in `ADR-003-checksum-and-recovery-review.md`, not implemented.
+The working tree now writes experimental checkpoint version 2, distinct from
+the legacy version 1, before accepting writes. A valid empty version-2 checkpoint
+allows an uncertified partial first frame to be truncated; a version-1 checkpoint
+is rejected without truncating the segment. Regression tests cover a one-byte
+partial first append and legacy-checkpoint refusal. This is not the proposed
+FORMAT-marker or no-mutation-on-refusal protocol, and it has not been verified
+under power loss or accepted as a stable format.
+If initialization fails with `checkpoint.tmp` present but no durable
+checkpoint, the working tree now refuses to reopen instead of overwriting the
+ambiguous temporary file. An operator procedure and an identity-based safe
+restart protocol remain to be designed.
+
+An append returning a terminal I/O error has an **unknown outcome**: after a
+checkpoint rename, even a directory-sync failure can leave the batch visible
+upon reopening. Callers must reconcile or implement an idempotent operation
+protocol before retrying. An error does not mean the write is absent.
 
 ## Problem
 
@@ -15,7 +38,7 @@ automatically recover the interrupted first-append case.
 1. Acquire the exclusive data-directory lock before examining or changing log
    files. Preserve the lock file while any process may have the log open.
 2. Only when the segment is absent or empty and no checkpoint exists, establish
-   a new empty segment and a version-1 checkpoint with certified length zero,
+   a new empty segment and a checkpoint with certified length zero,
    next offset zero and generation zero. Sync the segment, sync the checkpoint
    temporary file, rename it, then sync the containing directory before making
    the log available for append. Durably create any new parent directory entries
@@ -26,12 +49,13 @@ automatically recover the interrupted first-append case.
 4. After a valid empty checkpoint is durably committed, use the existing append
    protocol. An interrupted first append may leave a tail beyond the checkpoint;
    validate the certified prefix and truncate only the uncertified tail.
-5. Existing valid version-1 checkpoints and segments remain readable without
-   migration. An existing empty segment with no checkpoint is treated as new;
-   a nonempty segment with no checkpoint remains ambiguous and fails closed.
+5. Legacy version-1 checkpoints and segments are refused without truncation;
+   they require a separately approved migration or operator procedure. An
+   existing empty segment with no checkpoint is treated as new; a nonempty
+   segment with no checkpoint remains ambiguous and fails closed.
 
-The checkpoint bytes and segment format do not change, but the initialization
-and recovery semantics do. If all durable metadata and data disappear together,
+The experimental checkpoint version changes from 1 to 2, and the segment format
+changes. If all durable metadata and data disappear together,
 an empty directory cannot prove that the log was previously initialized; the
 protocol does not claim detection of complete external deletion or storage loss.
 
