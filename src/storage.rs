@@ -939,6 +939,9 @@ mod tests {
         CheckpointSync,
         CheckpointRename,
         DirectorySync,
+        DiskFullSegment,
+        DiskFullCheckpoint,
+        DiskFullDirectorySync,
     }
 
     #[derive(Debug)]
@@ -956,6 +959,10 @@ mod tests {
         fn write_segment(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
             match self.point {
                 FailurePoint::SegmentWrite => Err(Self::error(self.point)),
+                FailurePoint::DiskFullSegment => {
+                    file.write_all(&bytes[..bytes.len() / 2])?;
+                    Err(io::Error::from(rustix::io::Errno::NOSPC))
+                }
                 FailurePoint::PartialSegmentWrite => {
                     file.write_all(&bytes[..bytes.len() / 2])?;
                     Err(Self::error(self.point))
@@ -977,7 +984,10 @@ mod tests {
         }
 
         fn write_checkpoint(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
-            if matches!(self.point, FailurePoint::CheckpointWrite) {
+            if matches!(self.point, FailurePoint::DiskFullCheckpoint) {
+                file.write_all(&bytes[..bytes.len() / 2])?;
+                Err(io::Error::from(rustix::io::Errno::NOSPC))
+            } else if matches!(self.point, FailurePoint::CheckpointWrite) {
                 Err(Self::error(self.point))
             } else {
                 file.write_all(bytes)
@@ -1001,7 +1011,9 @@ mod tests {
         }
 
         fn sync_directory(&self, directory: &File) -> io::Result<()> {
-            if matches!(self.point, FailurePoint::DirectorySync) {
+            if matches!(self.point, FailurePoint::DiskFullDirectorySync) {
+                Err(io::Error::from(rustix::io::Errno::NOSPC))
+            } else if matches!(self.point, FailurePoint::DirectorySync) {
                 Err(Self::error(self.point))
             } else {
                 directory.sync_all()
@@ -1295,6 +1307,50 @@ mod tests {
             thread.join().unwrap();
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    // Inject ENOSPC at distinct commit boundaries; this is not a real full filesystem.
+    #[cfg(unix)]
+    #[test]
+    fn disk_full_preserves_acknowledged_data_and_fences_further_writes() {
+        for point in [
+            FailurePoint::DiskFullSegment,
+            FailurePoint::DiskFullCheckpoint,
+            FailurePoint::DiskFullDirectorySync,
+        ] {
+            let dir = temp_dir();
+            let mut log = Log::open(&dir).unwrap();
+            assert_eq!(log.append(b"acknowledged").unwrap(), Offset::ZERO);
+            drop(log);
+            let mut log = Log::open_with_io(&dir, Box::new(FaultIo { point })).unwrap();
+            assert!(
+                matches!(log.append(b"uncertain"), Err(Error::StorageTerminal(_))),
+                "{point:?}"
+            );
+            assert!(
+                matches!(log.append(b"retry"), Err(Error::StorageTerminal(_))),
+                "{point:?}"
+            );
+            drop(log);
+            let mut recovered = Log::open(&dir).unwrap();
+            assert_eq!(
+                recovered.read_batch(Offset::ZERO).unwrap().unwrap().records,
+                b"acknowledged",
+                "{point:?}"
+            );
+            let uncertain = recovered.read_batch(Offset::new(1)).unwrap();
+            if matches!(point, FailurePoint::DiskFullDirectorySync) {
+                assert_eq!(uncertain.unwrap().records, b"uncertain");
+            } else {
+                assert_eq!(uncertain, None, "{point:?}");
+            }
+            if matches!(point, FailurePoint::DiskFullCheckpoint) {
+                assert!(dir.join("checkpoint.tmp").exists());
+                assert!(recovered.append(b"blocked").is_err());
+            }
+            drop(recovered);
+            fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     #[test]
