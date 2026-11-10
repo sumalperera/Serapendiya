@@ -27,16 +27,35 @@ mount /dev/mapper/serapendiya-replay /mnt/live
 REPLAY_LOG_DIR=/mnt/live/log "$bin" --ignored --exact generate_trace --nocapture
 umount /mnt/live
 dmsetup remove serapendiya-replay
+# Replay each mark twice: normal kernel journal recovery and explicit fsck
+# repair must not influence one another. Each pass starts from a fresh image.
 for mark in acknowledged segment-write segment-sync checkpoint-write checkpoint-sync checkpoint-rename directory-sync second-ack; do
-  echo "=== REPLAY $mark ==="
-  truncate -s 0 /tmp/serapendiya-replay.img
-  truncate -s 256M /tmp/serapendiya-replay.img
-  loop=$(losetup --find --show /tmp/serapendiya-replay.img)
-  "$SERAPENDIYA_REPLAY_TOOL" --log /dev/vdc --replay "$loop" --end-mark "$mark"
-  e2fsck -fy "$loop" || [ "$?" -eq 1 ]
-  mount "$loop" /mnt/replay
-  REPLAY_LOG_DIR=/mnt/replay/log REPLAY_MARK="$mark" "$bin" --ignored --exact verify_replay --nocapture
-  umount /mnt/replay
-  losetup -d "$loop"
-  loop=""
+  for recovery in mount fsck; do
+    echo "=== REPLAY $mark RECOVERY $recovery ==="
+    truncate -s 0 /tmp/serapendiya-replay.img
+    truncate -s 256M /tmp/serapendiya-replay.img
+    loop=$(losetup --find --show /tmp/serapendiya-replay.img)
+    "$SERAPENDIYA_REPLAY_TOOL" --log /dev/vdc --replay "$loop" --end-mark "$mark"
+    if [[ $recovery == fsck ]]; then
+      e2fsck -fy "$loop" || [ "$?" -eq 1 ]
+    else
+      # A normal read-write ext4 mount replays the journal. Inspect the result
+      # without repairing it before the application has opened the log.
+      mount "$loop" /mnt/replay
+      umount /mnt/replay
+      set +e
+      e2fsck -fn "$loop"
+      fsck_status=$?
+      set -e
+      echo "POST_MOUNT_FSCK_STATUS=$fsck_status"
+      # A nonzero result means normal mount recovery did not establish a
+      # clean check (or the check itself failed); do not report success.
+      if (( fsck_status != 0 )); then exit "$fsck_status"; fi
+    fi
+    mount "$loop" /mnt/replay
+    REPLAY_LOG_DIR=/mnt/replay/log REPLAY_MARK="$mark" "$bin" --ignored --exact verify_replay --nocapture
+    umount /mnt/replay
+    losetup -d "$loop"
+    loop=""
+  done
 done
