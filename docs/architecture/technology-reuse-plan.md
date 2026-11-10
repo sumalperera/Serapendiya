@@ -6,6 +6,14 @@ for later-gate code. See [the roadmap](../roadmap.md) for scope and sequencing.
 
 ## Reuse policy
 
+The founder's standing instruction is to evaluate relevant established
+streaming/storage approaches and reusable components before implementing a
+feature or material redesign. Use
+[the feature review template](feature-review-template.md) to record sources,
+alternatives, selection, deliberate differences and validation. Apply this
+throughout the project, including improvements to existing features; the
+candidate list below is a starting point, not an exhaustive technology menu.
+
 Start with established mechanisms and maintained implementations. A widely used
 library is evidence for its component, not proof of our integration or workload.
 Review exact versions, upstream maintenance, advisories, MSRV, platform support,
