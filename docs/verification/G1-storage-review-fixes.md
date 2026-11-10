@@ -71,5 +71,7 @@ No self-approval or gate acceptance is recorded by this repair.
 The standing engineering rule and template from the other open documentation
 MR have been included on the consolidation branch. Agent instructions and the
 local blueprint stay ignored. The two pre-existing staged images are excluded.
-Do not call all review findings resolved or create the consolidated MR until
-these remaining decisions/work are completed under the founder's direction.
+The consolidated MR includes the completed repairs and the remaining design
+proposal together, superseding the separate CRC and engineering-rule MRs at the
+founder's request. It must not describe the architectural proposals as implemented
+or claim all review findings are resolved.
