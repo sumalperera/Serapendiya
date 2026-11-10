@@ -62,6 +62,11 @@ bounded decoding and compatibility then; no speculative dependencies now.
 
 ## First optimization experiment
 
+Implementation follow-up: the existing wrapper now uses pinned `crc32c` 0.6.9.
+See [compatibility verification](../verification/G1-crc-library.md) and
+[local storage measurements](../benchmarks/crc-library-comparison.md).
+This selects the checksum implementation, not a new coverage or container format.
+
 Separate algorithm implementation from persistent-format changes. Evaluate a
 library CRC against the current bitwise CRC on exactly the same bytes first.
 Check the empty input, independent batch fixtures, incremental versus one-shot

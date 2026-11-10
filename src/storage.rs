@@ -905,14 +905,7 @@ fn write_checkpoint(
 }
 
 fn crc32c(bytes: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for &byte in bytes {
-        crc ^= byte as u32;
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ (0x82f63b78 & (!((crc & 1).wrapping_sub(1))));
-        }
-    }
-    !crc
+    crc32c::crc32c(bytes)
 }
 
 #[cfg(test)]
@@ -1253,6 +1246,80 @@ mod tests {
         }
     }
 
+    fn reference_crc32c(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &byte in bytes {
+            crc ^= byte as u32;
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0x82f63b78 & (!((crc & 1).wrapping_sub(1))));
+            }
+        }
+        !crc
+    }
+
+    #[test]
+    fn library_crc_matches_bitwise_reference_and_incremental_updates() {
+        let mut state = 0x91e1_0da5u32;
+        let data: Vec<u8> = (0..(1024 * 1024 + 16))
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect();
+        let lengths: Vec<usize> = (0..=256)
+            .chain([511, 512, 513, 8191, 8192, 8193, 65536, 1024 * 1024])
+            .collect();
+        for length in lengths {
+            for alignment in 0..16 {
+                let bytes = &data[alignment..alignment + length];
+                let expected = reference_crc32c(bytes);
+                assert_eq!(
+                    crc32c(bytes),
+                    expected,
+                    "length={length}, alignment={alignment}"
+                );
+                let split = length / 2;
+                assert_eq!(
+                    crc32c::crc32c_append(crc32c(&bytes[..split]), &bytes[split..]),
+                    expected
+                );
+            }
+        }
+        for byte in [0, 0xff] {
+            assert_eq!(
+                crc32c(&vec![byte; 8193]),
+                reference_crc32c(&vec![byte; 8193])
+            );
+        }
+        assert_eq!(crc32c(b""), 0);
+    }
+
+    #[test]
+    fn persisted_checkpoint_checksum_matches_previous_algorithm() {
+        let dir = temp_dir();
+        let mut log = Log::open(&dir).unwrap();
+        log.append_group(&[b"one", b"two"]).unwrap();
+        drop(log);
+        let bytes = fs::read(dir.join("checkpoint")).unwrap();
+        assert_eq!(
+            reference_crc32c(&bytes[..32]),
+            u32::from_be_bytes(bytes[32..36].try_into().unwrap())
+        );
+        let mut reopened = Log::open(&dir).unwrap();
+        assert_eq!(
+            reopened
+                .read_batch(Offset::new(1))
+                .unwrap()
+                .unwrap()
+                .records,
+            b"two"
+        );
+        drop(reopened);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn crc32c_known_vector() {
         assert_eq!(crc32c(b"123456789"), 0xe3069283);
@@ -1554,11 +1621,11 @@ mod tests {
         );
         assert_eq!(&frame[..4], b"SRB1");
         assert_eq!(
-            crc32c(&frame[..28]),
+            reference_crc32c(&frame[..28]),
             u32::from_be_bytes(frame[28..32].try_into().unwrap())
         );
         assert_eq!(
-            crc32c(&frame[CONTAINER_HEADER_LEN..]),
+            reference_crc32c(&frame[CONTAINER_HEADER_LEN..]),
             u32::from_be_bytes(frame[24..28].try_into().unwrap())
         );
     }
