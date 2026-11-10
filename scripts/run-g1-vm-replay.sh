@@ -48,6 +48,9 @@ for mark in init-before-open init-segment-sync init-checkpoint-write init-checkp
     truncate -s 0 /tmp/serapendiya-replay.img
     truncate -s "$bytes" /tmp/serapendiya-replay.img
     loop=$(losetup --find --show /tmp/serapendiya-replay.img)
+    # replay-log's replay mode can return success at end-of-log even when
+    # the requested end mark is absent. Find mode fails if it is missing.
+    "$SERAPENDIYA_REPLAY_TOOL" --log /dev/vdc --find --end-mark "$mark" >/dev/null
     "$SERAPENDIYA_REPLAY_TOOL" --log /dev/vdc --replay "$loop" --end-mark "$mark"
     if [[ $recovery == fsck ]]; then
       e2fsck -fy "$loop" || [ "$?" -eq 1 ]

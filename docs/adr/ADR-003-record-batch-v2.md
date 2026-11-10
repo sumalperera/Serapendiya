@@ -1,6 +1,9 @@
 # ADR-003: RecordBatch v2 storage design
 
-Status: **ACCEPTED**
+Status: **ACCEPTED for the original prototype**. The current experimental
+container differs from this original text; its amendment remains proposed and
+the storage format is not accepted as stable. See
+[the ADR reconciliation review](../verification/G1-adr-reconciliation.md).
 
 The first storage slice uses one `segment-000000.log` with Kafka RecordBatch v2
 header framing, broker-assigned contiguous base offsets, checked signed batch

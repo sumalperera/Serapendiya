@@ -1,6 +1,9 @@
 # ADR-003/004 review: split checksums, versions and recovery
 
-Status: **PROPOSED alternatives; no decision or stable format.** The founder
+Status: **PROPOSED alternatives; no decision or stable format.** The
+implementation observations below were recorded before the directory-descriptor
+hardening in PR #15; see [the ADR reconciliation review](../verification/G1-adr-reconciliation.md)
+for current behavior and its limits. The founder
 requested an engineering review of the 2026-11-09 proposal; the container
 merged in PR #13 is experimental and uses the earlier full-payload CRC.
 The safety changes in PR #12 are merged independently.
