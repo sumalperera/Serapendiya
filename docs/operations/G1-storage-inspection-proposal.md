@@ -1,7 +1,9 @@
 # Proposed G1 storage inspection procedure
 
-**Status: draft for review.** There is no supported repair or migration tool
-for these states. The procedure preserves evidence; it is not permission to
+**Status: draft for review.** The selected G1 scope calls for preserving and
+inspecting an offline copy first; this procedure still requires review and
+operational testing. There is no supported repair or migration tool for these
+states. The procedure preserves evidence; it is not permission to
 repair, truncate, delete files or manufacture a checkpoint. A terminal append
 error can mean the append was persisted, so avoid automatic retries.
 

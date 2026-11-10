@@ -1,8 +1,11 @@
 # ADR-004: initialization and recovery state proposal
 
-Status: **PROPOSED for review; not an accepted protocol or authorization to
-change the storage format.** This document distinguishes current behavior from
-recommendations. It supplements [ADR-004](ADR-004-durability-recovery.md), the
+Status: **G1 recovery scope selected; full protocol and format remain
+PROPOSED.** The founder instructed the project to proceed with the scope below
+in the project conversation. This selects the G1 boundary; it does not accept
+G1, approve a stable format, or authorize an automatic recovery mechanism.
+This document distinguishes current behavior from future decisions. It
+supplements [ADR-004](ADR-004-durability-recovery.md), the
 [initialization proposal](ADR-004-initialization-proposal.md), and the
 [implementation reconciliation](../verification/G1-adr-reconciliation.md).
 The table describes the code at merged commit `1622fda` under its supported
@@ -37,28 +40,30 @@ has later bytes, opening may truncate them as an uncertified suffix. In
 particular, a successful checksum or incrementing `generation` does not prove
 freshness. Preserve a copy before opening when stale metadata is suspected.
 
-## Proposed contract for review
+## Selected G1 recovery scope
 
 1. **Ordinary crash recovery:** on a documented local filesystem and storage
    stack that correctly honors successful sync and rename operations, a
    successful append must remain recoverable after the modeled interruption.
-   Failed or timed-out appends have an unknown outcome; callers reconcile
-   before retrying. An acknowledgement is local, not replicated.
+   Once a commit may have begun, a failed or timed-out append has an unknown
+   outcome; callers reconcile before retrying. A rejection known to occur
+   before any write is distinguishable. An acknowledgement is local, not
+   replicated.
 2. **Ambiguous initialization:** retain the current refusal until a reviewed
    identity and initialization protocol can distinguish interrupted creation
    from lost certification metadata. A filename, empty segment, stale lock,
    empty directory or `FORMAT` marker alone does not prove no acknowledged
-   data existed. No automatic deletion or reset is authorized by this proposal.
+   data existed. No automatic deletion or reset is authorized by this decision.
 3. **Rollback outside the basic crash model:** restoring an older valid
    checkpoint, coherent disk snapshot rollback, external deletion or a storage
    stack that falsely reports successful sync can defeat local freshness checks.
-   The current implementation cannot detect these cases. If rollback detection
-   is required, design an independently durable authority and its own recovery,
-   availability and fencing rules; do not repurpose the local generation as a
-   standalone fence. This is a proposed scope boundary, not a claim about all
-   physical devices.
+   The current implementation cannot detect these cases. Detection of
+   externally restored or rolled-back valid checkpoints is deferred beyond G1.
+   If it is needed later, design an independently durable authority and its own
+   recovery, availability and fencing rules; the local generation alone is not
+   a fence. This boundary is not a claim about all physical devices.
 4. **Operator action:** preserve and inspect an offline copy first. The
-   [proposed procedure](../operations/G1-storage-inspection-proposal.md)
+   [draft procedure](../operations/G1-storage-inspection-proposal.md)
    does not authorize truncation, migration, deletion or manufacture of a new
    checkpoint. A new empty log can be created at a separate path only when the
    operator explicitly accepts that it is a new identity and reconciles any
@@ -71,8 +76,9 @@ freshness. Preserve a copy before opening when stale metadata is suspected.
 
 ## Review and evidence needed before acceptance
 
-- Agree the crash, storage, rollback and adversary assumptions; review the
-  table against the actual implementation and supported filesystems.
+- Review the selected crash, storage, rollback and adversary assumptions and
+  the table against the implementation and supported filesystems. The selected
+  scope does not waive verification of in-scope crash behavior.
 - Specify each initialization and directory operation's failure states,
   including the interval before the first checkpoint, and test uninstrumented
   syscall boundaries and concurrent openers.
