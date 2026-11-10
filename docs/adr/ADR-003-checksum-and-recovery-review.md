@@ -8,6 +8,10 @@ requested an engineering review of the 2026-11-09 proposal; the container
 merged in PR #13 is experimental and uses the earlier full-payload CRC.
 The safety changes in PR #12 are merged independently.
 
+A checksum-only measurement and its limitations are recorded in
+[the benchmark report](../benchmarks/checksum-model-comparison.md). It does not
+select or implement an alternative persistent format.
+
 ## Refined split-checksum candidate
 
 Threat model: detect accidental corruption, stale and misplaced writes, not

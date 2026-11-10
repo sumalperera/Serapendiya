@@ -1153,6 +1153,106 @@ mod tests {
         std::env::temp_dir().join(format!("serapendiya-storage-{nonce}-{counter}"))
     }
 
+    // Measurement-only model: these 73 bytes are not an on-disk format.
+    // It approximates chained coverage over metadata plus the batch prefix.
+    fn split_header_input(frame: &[u8], previous: u32, index: u64, position: u64) -> [u8; 73] {
+        let mut data = [0u8; 73];
+        data[..4].copy_from_slice(&previous.to_le_bytes());
+        data[4..12].copy_from_slice(&index.to_le_bytes());
+        data[12..20].copy_from_slice(&position.to_le_bytes());
+        data[20..28].copy_from_slice(&frame[12..20]);
+        data[28..52].copy_from_slice(&frame[..24]);
+        data[52..].copy_from_slice(&frame[CONTAINER_HEADER_LEN..CONTAINER_HEADER_LEN + 21]);
+        data
+    }
+
+    #[test]
+    fn split_checksum_model_detects_one_bit_flip_at_each_covered_byte() {
+        let frame = encode_container(Offset::ZERO, b"sample payload").unwrap();
+        let expected_header = crc32c(&split_header_input(&frame, 42, 3, 100));
+        let expected_batch = crc32c(&frame[CONTAINER_HEADER_LEN + 21..]);
+        // Bytes 24..32 are the old format's checksums, not fields in the model.
+        for i in (0..24).chain(CONTAINER_HEADER_LEN..frame.len()) {
+            let mut changed = frame.clone();
+            changed[i] ^= 1;
+            let metadata_changed =
+                crc32c(&split_header_input(&changed, 42, 3, 100)) != expected_header;
+            let payload_changed = crc32c(&changed[CONTAINER_HEADER_LEN + 21..]) != expected_batch;
+            assert!(
+                metadata_changed || payload_changed,
+                "undetected flip at {i}"
+            );
+        }
+        assert_ne!(
+            crc32c(&split_header_input(&frame, 43, 3, 100)),
+            expected_header
+        );
+        assert_ne!(
+            crc32c(&split_header_input(&frame, 42, 4, 100)),
+            expected_header
+        );
+        assert_ne!(
+            crc32c(&split_header_input(&frame, 42, 3, 101)),
+            expected_header
+        );
+    }
+
+    /// Repeatable checksum-only experiment, not a complete storage benchmark.
+    #[test]
+    #[ignore = "manual release-mode measurement"]
+    fn measure_checksum_coverage_models() {
+        use std::{hint::black_box, time::Instant};
+        const TARGET_BYTES: usize = 8 * 1024 * 1024;
+        const SAMPLES: usize = 5;
+        println!("value_bytes,batch_bytes,iterations,sample,full_ns,split_ns");
+        for value_size in [32usize, 1024, 65536, 1048576] {
+            let value: Vec<u8> = (0..value_size)
+                .map(|n| (n.wrapping_mul(31) % 251) as u8)
+                .collect();
+            let frame = encode_container(Offset::ZERO, &value).unwrap();
+            let batch = &frame[CONTAINER_HEADER_LEN..];
+            let iterations = (TARGET_BYTES / batch.len()).max(8);
+            for sample in 0..SAMPLES {
+                let full = || {
+                    let start = Instant::now();
+                    for _ in 0..iterations {
+                        black_box(crc32c(black_box(&frame[..28])));
+                        black_box(crc32c(black_box(batch)));
+                        black_box(crc32c(black_box(&batch[21..])));
+                    }
+                    start.elapsed().as_nanos()
+                };
+                let split = || {
+                    let start = Instant::now();
+                    let mut chain = 42;
+                    for i in 0..iterations {
+                        let header = split_header_input(
+                            black_box(&frame),
+                            chain,
+                            i as u64,
+                            i as u64 * batch.len() as u64,
+                        );
+                        chain = black_box(crc32c(black_box(&header)));
+                        black_box(crc32c(black_box(&batch[21..])));
+                    }
+                    black_box(chain);
+                    start.elapsed().as_nanos()
+                };
+                // Alternate order to reduce systematic warmup bias.
+                let (full_ns, split_ns) = if sample % 2 == 0 {
+                    (full(), split())
+                } else {
+                    let split_ns = split();
+                    (full(), split_ns)
+                };
+                println!(
+                    "{value_size},{},{iterations},{sample},{full_ns},{split_ns}",
+                    batch.len()
+                );
+            }
+        }
+    }
+
     #[test]
     fn crc32c_known_vector() {
         assert_eq!(crc32c(b"123456789"), 0xe3069283);
