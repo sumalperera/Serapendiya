@@ -1,0 +1,31 @@
+
+running 1 test
+THROUGHPUT value_bytes=32 group=1 records_per_sec=76.0
+METRIC append_group value_bytes=32 group=1 n=320 p50_ns=12828500 p99_ns=26152667 p999_ns=36937125
+METRIC warm_fetch value_bytes=32 group=1 n=1280 p50_ns=17250 p99_ns=67458 p999_ns=3256667
+METRIC restart value_bytes=32 group=1 n=15 p50_ns=480209 p99_ns=1416459 p999_ns=1416459
+THROUGHPUT value_bytes=32 group=16 records_per_sec=1231.4
+METRIC append_group value_bytes=32 group=16 n=320 p50_ns=12712208 p99_ns=31188292 p999_ns=42679208
+METRIC warm_fetch value_bytes=32 group=16 n=1280 p50_ns=15875 p99_ns=114750 p999_ns=360292
+METRIC restart value_bytes=32 group=16 n=15 p50_ns=2246167 p99_ns=2981917 p999_ns=2981917
+THROUGHPUT value_bytes=1024 group=1 records_per_sec=77.6
+METRIC append_group value_bytes=1024 group=1 n=320 p50_ns=12182209 p99_ns=29120333 p999_ns=57233917
+METRIC warm_fetch value_bytes=1024 group=1 n=1280 p50_ns=3666 p99_ns=15667 p999_ns=37167
+METRIC restart value_bytes=1024 group=1 n=15 p50_ns=317833 p99_ns=502375 p999_ns=502375
+THROUGHPUT value_bytes=1024 group=16 records_per_sec=1191.2
+METRIC append_group value_bytes=1024 group=16 n=320 p50_ns=13128334 p99_ns=19806667 p999_ns=23660333
+METRIC warm_fetch value_bytes=1024 group=16 n=1280 p50_ns=8709 p99_ns=31667 p999_ns=217791
+METRIC restart value_bytes=1024 group=16 n=15 p50_ns=2751125 p99_ns=3963583 p999_ns=3963583
+THROUGHPUT value_bytes=65536 group=1 records_per_sec=81.8
+METRIC append_group value_bytes=65536 group=1 n=320 p50_ns=11986208 p99_ns=17007042 p999_ns=29050083
+METRIC warm_fetch value_bytes=65536 group=1 n=1280 p50_ns=27250 p99_ns=72166 p999_ns=114250
+METRIC restart value_bytes=65536 group=1 n=15 p50_ns=1213333 p99_ns=3117292 p999_ns=3117292
+THROUGHPUT value_bytes=65536 group=16 records_per_sec=1218.1
+METRIC append_group value_bytes=65536 group=16 n=320 p50_ns=12973125 p99_ns=18804875 p999_ns=27190500
+METRIC warm_fetch value_bytes=65536 group=16 n=1280 p50_ns=38542 p99_ns=446166 p999_ns=4162250
+METRIC restart value_bytes=65536 group=16 n=15 p50_ns=20296125 p99_ns=33961833 p999_ns=33961833
+test measure_storage_operations ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.25s
+
+PROCESS exit=0 wall_s=26.641 user_s=0.386 sys_s=3.160 maxrss_bytes_macos=6569984

@@ -38,9 +38,17 @@ fn measure_storage_operations() {
                     std::process::id()
                 ));
                 let payload: Vec<_> = (0..size).map(|i| i as u8).collect();
-                let values = vec![payload.as_slice(); group];
                 let mut log = Log::open(&dir).unwrap();
-                for _ in 0..64 {
+                for commit in 0..64 {
+                    let owned: Vec<Vec<u8>> = (0..group)
+                        .map(|i| {
+                            let mut value = payload.clone();
+                            value[..8]
+                                .copy_from_slice(&((commit * group + i) as u64).to_be_bytes());
+                            value
+                        })
+                        .collect();
+                    let values: Vec<&[u8]> = owned.iter().map(Vec::as_slice).collect();
                     let start = Instant::now();
                     black_box(log.append_group(black_box(&values)).unwrap());
                     let elapsed = start.elapsed().as_nanos();
@@ -53,7 +61,9 @@ fn measure_storage_operations() {
                     let start = Instant::now();
                     let batch = log.read_batch(offset).unwrap().unwrap();
                     fetch.push(start.elapsed().as_nanos());
-                    assert_eq!(batch.records, payload);
+                    assert_eq!(batch.offset, offset);
+                    assert_eq!(&batch.records[..8], &offset.get().to_be_bytes());
+                    assert_eq!(&batch.records[8..], &payload[8..]);
                 }
                 drop(log);
                 for _ in 0..3 {

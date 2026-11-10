@@ -115,6 +115,13 @@ email or tool execution merely by retaining an event.
 
 ## Technology and reuse priorities
 
+Every feature or material redesign follows the standing engineering evaluation
+process in [the reuse plan](architecture/technology-reuse-plan.md). Before coding, review applicable established
+approaches and reusable components, record the chosen approach and deliberate
+differences, and define the correctness/performance evidence. This rule applies
+across all gates without granting implementation authority for future gates.
+
+
 Use [the technology reuse plan](architecture/technology-reuse-plan.md) as the
 decision checklist before building a subsystem. Reuse maintained libraries for
 commodity mechanisms; keep the broker's ownership, durability and authorization

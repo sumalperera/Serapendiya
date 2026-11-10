@@ -29,6 +29,7 @@ const CONTAINER_MAGIC: &[u8; 4] = b"SRB1";
 const FIXED_BATCH_REMAINDER: usize = 49;
 const CHECKPOINT_LEN: usize = 36;
 const INDEX_STRIDE: u64 = 16;
+const INDEX_INTERVAL_BYTES: u64 = 4096;
 const MAX_GROUP_BATCHES: usize = 1024;
 const MAX_GROUP_BYTES: usize = 16 * 1024 * 1024;
 
@@ -289,8 +290,8 @@ impl Log {
 
         let mut next_offset = self.next_offset;
         let mut offsets = Vec::with_capacity(batches.len());
-        let mut frames = Vec::with_capacity(batches.len());
-        let mut total_len = 0usize;
+        let mut frame_ends = Vec::with_capacity(batches.len());
+        let mut group = Vec::with_capacity(group_len);
         for records in batches {
             let base_offset = next_offset;
             if base_offset.get() > i64::MAX as u64 {
@@ -298,12 +299,9 @@ impl Log {
                     "offset exceeds signed 64-bit range".into(),
                 ));
             }
-            let frame = encode_container(base_offset, records)?;
-            total_len = total_len
-                .checked_add(frame.len())
-                .ok_or_else(|| Error::InvalidBatch("group length overflow".into()))?;
+            encode_container_into(&mut group, base_offset, records)?;
             offsets.push(base_offset);
-            frames.push(frame);
+            frame_ends.push(group.len());
             next_offset = next_offset
                 .checked_next()
                 .ok_or_else(|| Error::InvalidBatch("offset overflow".into()))?;
@@ -312,10 +310,6 @@ impl Log {
             .batch_count
             .checked_add(batches.len() as u64)
             .ok_or_else(|| Error::InvalidBatch("batch count overflow".into()))?;
-        let mut group = Vec::with_capacity(total_len);
-        for frame in &frames {
-            group.extend_from_slice(frame);
-        }
         let append_position = self
             .certified_len
             .checked_add(group.len() as u64)
@@ -343,14 +337,16 @@ impl Log {
         self.durable_offset = offsets.last().copied();
         self.visible_offset = self.durable_offset;
         let mut position = self.certified_len - group.len() as u64;
-        for (index, frame) in frames.iter().enumerate() {
-            if (self.batch_count + index as u64) % INDEX_STRIDE == 0 {
+        let mut previous_end = 0;
+        for (index, &end) in frame_ends.iter().enumerate() {
+            if needs_index_entry(&self.index, self.batch_count + index as u64, position) {
                 self.index.push(IndexEntry {
                     offset: offsets[index],
                     position,
                 });
             }
-            position += frame.len() as u64;
+            position += (end - previous_end) as u64;
+            previous_end = end;
         }
         self.batch_count = next_batch_count;
         Ok(offsets)
@@ -371,6 +367,10 @@ impl Log {
     pub fn batch_count(&self) -> u64 {
         self.batch_count
     }
+    /// Diagnostic sequence of certified commits, not a freshness or fencing token.
+    pub fn checkpoint_generation(&self) -> u64 {
+        self.generation
+    }
     pub fn index_entries(&self) -> &[IndexEntry] {
         &self.index
     }
@@ -383,6 +383,25 @@ impl Log {
     }
 
     pub fn read_batch(&mut self, requested: Offset) -> Result<Option<StoredBatch>> {
+        if let Some(reason) = &self.terminal_error {
+            return Err(Error::StorageTerminal(reason.clone()));
+        }
+        let result = self.read_batch_inner(requested);
+        if let Err(error @ Error::CertifiedCorruption { .. }) = &result {
+            self.terminal_error = Some(error.to_string());
+        }
+        result
+    }
+
+    /// Last latched failure; restart does not repair certified corruption.
+    pub fn terminal_reason(&self) -> Option<&str> {
+        self.terminal_error.as_deref()
+    }
+
+    fn read_batch_inner(&mut self, requested: Offset) -> Result<Option<StoredBatch>> {
+        if requested >= self.next_offset {
+            return Ok(None);
+        }
         let index = self
             .index
             .partition_point(|entry| entry.offset <= requested);
@@ -405,13 +424,11 @@ impl Log {
                     reason: "base offset is not contiguous".into(),
                 });
             }
-            validate_frame(&frame, position)?;
+            let value = validate_frame(&frame, position)?;
             if frame.base_offset == requested {
                 return Ok(Some(StoredBatch {
                     offset: frame.base_offset,
-                    records: decode_record(&frame.data[HEADER_LEN..])
-                        .map_err(|reason| Error::CertifiedCorruption { position, reason })?
-                        .to_vec(),
+                    records: value.to_vec(),
                 }));
             }
             if frame.base_offset > requested {
@@ -584,20 +601,7 @@ fn validate_directory_entries(_directory: &File) -> Result<bool> {
 
 #[cfg(unix)]
 fn lock_directory(file: &File) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-
-    unsafe extern "C" {
-        fn flock(fd: i32, operation: i32) -> i32;
-    }
-    const LOCK_EX: i32 = 2;
-    const LOCK_NB: i32 = 4;
-    // The descriptor belongs to this live File. The OS releases the lock when
-    // the File is dropped; the lock file itself must never be unlinked in use.
-    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    rfs::flock(file, rfs::FlockOperation::NonBlockingLockExclusive).map_err(io::Error::from)
 }
 
 #[cfg(not(unix))]
@@ -616,38 +620,61 @@ fn put_varint(mut value: u32, out: &mut Vec<u8>) {
     out.push(value as u8);
 }
 
-fn encode_container(base_offset: Offset, value: &[u8]) -> Result<Vec<u8>> {
+fn varint_len(mut value: u32) -> usize {
+    let mut length = 1;
+    while value >= 0x80 {
+        length += 1;
+        value >>= 7;
+    }
+    length
+}
+
+fn encode_container_into(out: &mut Vec<u8>, base_offset: Offset, value: &[u8]) -> Result<()> {
     let value_len = u32::try_from(value.len())
         .ok()
         .and_then(|n| n.checked_mul(2))
         .ok_or_else(|| Error::InvalidBatch("record too large".into()))?;
-    let mut record = vec![0, 0, 0, 1]; // attributes, timestamp delta, offset delta, null key
-    put_varint(value_len, &mut record);
-    record.extend_from_slice(value);
-    record.push(0); // no headers
-    let record_len = u32::try_from(record.len())
+    let record_len = 5usize
+        .checked_add(varint_len(value_len))
+        .and_then(|n| n.checked_add(value.len()))
+        .ok_or_else(|| Error::InvalidBatch("record length overflow".into()))?;
+    let encoded_record_len = u32::try_from(record_len)
         .ok()
         .and_then(|n| n.checked_mul(2))
         .ok_or_else(|| Error::InvalidBatch("record too large".into()))?;
-    let mut records = Vec::with_capacity(record.len() + 5);
-    put_varint(record_len, &mut records);
-    records.extend_from_slice(&record);
-    let batch_len = i32::try_from(FIXED_BATCH_REMAINDER + records.len())
-        .map_err(|_| Error::InvalidBatch("batch too large".into()))?;
-    let batch = encode_batch(base_offset, batch_len, &records);
-    let mut header = [0u8; CONTAINER_HEADER_LEN];
+    let batch_len =
+        i32::try_from(FIXED_BATCH_REMAINDER + varint_len(encoded_record_len) + record_len)
+            .map_err(|_| Error::InvalidBatch("batch too large".into()))?;
+    let start = out.len();
+    out.extend_from_slice(&[0u8; CONTAINER_HEADER_LEN]);
+    let batch_start = out.len();
+    append_batch_header(out, base_offset, batch_len);
+    put_varint(encoded_record_len, out);
+    out.extend_from_slice(&[0, 0, 0, 1]);
+    put_varint(value_len, out);
+    out.extend_from_slice(value);
+    out.push(0);
+    let batch_crc = crc32c(&out[batch_start + 21..]);
+    out[batch_start + 17..batch_start + 21].copy_from_slice(&batch_crc.to_be_bytes());
+    let length = (out.len() - batch_start) as u32;
+    let payload_crc = crc32c(&out[batch_start..]);
+    let header = &mut out[start..batch_start];
     header[..4].copy_from_slice(CONTAINER_MAGIC);
     header[4] = 1;
-    header[8..12].copy_from_slice(&(batch.len() as u32).to_be_bytes());
+    header[8..12].copy_from_slice(&length.to_be_bytes());
     header[12..20].copy_from_slice(&base_offset.get().to_be_bytes());
     header[20..24].copy_from_slice(&1u32.to_be_bytes());
-    header[24..28].copy_from_slice(&crc32c(&batch).to_be_bytes());
+    header[24..28].copy_from_slice(&payload_crc.to_be_bytes());
     let checksum = crc32c(&header[..28]);
     header[28..32].copy_from_slice(&checksum.to_be_bytes());
-    let mut frame = Vec::with_capacity(header.len() + batch.len());
-    frame.extend_from_slice(&header);
-    frame.extend_from_slice(&batch);
-    Ok(frame)
+    Ok(())
+}
+
+#[cfg(test)]
+fn encode_container(base_offset: Offset, value: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    encode_container_into(&mut out, base_offset, value)?;
+    Ok(out)
 }
 
 fn get_varint(bytes: &[u8], pos: &mut usize) -> std::result::Result<u32, String> {
@@ -690,8 +717,7 @@ fn decode_record(bytes: &[u8]) -> std::result::Result<&[u8], String> {
     Ok(value)
 }
 
-fn encode_batch(base_offset: Offset, batch_length: i32, records: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(HEADER_LEN + records.len());
+fn append_batch_header(frame: &mut Vec<u8>, base_offset: Offset, batch_length: i32) {
     frame.extend_from_slice(&(base_offset.get() as i64).to_be_bytes());
     frame.extend_from_slice(&batch_length.to_be_bytes());
     frame.extend_from_slice(&0i32.to_be_bytes());
@@ -705,10 +731,23 @@ fn encode_batch(base_offset: Offset, batch_length: i32, records: &[u8]) -> Vec<u
     frame.extend_from_slice(&(-1i16).to_be_bytes());
     frame.extend_from_slice(&(-1i32).to_be_bytes());
     frame.extend_from_slice(&1i32.to_be_bytes());
+}
+
+#[cfg(test)]
+fn encode_batch(base_offset: Offset, batch_length: i32, records: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(HEADER_LEN + records.len());
+    append_batch_header(&mut frame, base_offset, batch_length);
     frame.extend_from_slice(records);
     let crc = crc32c(&frame[21..]);
     frame[17..21].copy_from_slice(&(crc as i32).to_be_bytes());
     frame
+}
+
+fn needs_index_entry(index: &[IndexEntry], batch_count: u64, position: u64) -> bool {
+    batch_count % INDEX_STRIDE == 0
+        || index
+            .last()
+            .is_none_or(|last| position - last.position >= INDEX_INTERVAL_BYTES)
 }
 
 fn recover_certified_prefix(segment: &mut File, checkpoint: Checkpoint) -> Result<RecoverySummary> {
@@ -726,7 +765,7 @@ fn recover_certified_prefix(segment: &mut File, checkpoint: Checkpoint) -> Resul
             });
         }
         validate_frame(&frame, position)?;
-        if batch_count % INDEX_STRIDE == 0 {
+        if needs_index_entry(&index, batch_count, position) {
             index.push(IndexEntry {
                 offset: frame.base_offset,
                 position,
@@ -819,7 +858,7 @@ fn read_frame(file: &mut File, position: u64, limit: u64) -> Result<Frame> {
     })
 }
 
-fn validate_frame(frame: &Frame, position: u64) -> Result<()> {
+fn validate_frame(frame: &Frame, position: u64) -> Result<&[u8]> {
     if frame.data[16] != 2 {
         return Err(Error::CertifiedCorruption {
             position,
@@ -846,8 +885,7 @@ fn validate_frame(frame: &Frame, position: u64) -> Result<()> {
         });
     }
     decode_record(&frame.data[HEADER_LEN..])
-        .map_err(|reason| Error::CertifiedCorruption { position, reason })?;
-    Ok(())
+        .map_err(|reason| Error::CertifiedCorruption { position, reason })
 }
 
 fn certified_io(position: u64, error: io::Error) -> Error {
@@ -1317,6 +1355,116 @@ mod tests {
             b"two"
         );
         drop(reopened);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn previous_encode_container(base_offset: Offset, value: &[u8]) -> Result<Vec<u8>> {
+        let value_len = u32::try_from(value.len())
+            .ok()
+            .and_then(|n| n.checked_mul(2))
+            .ok_or_else(|| Error::InvalidBatch("record too large".into()))?;
+        let mut record = vec![0, 0, 0, 1]; // attributes, timestamp delta, offset delta, null key
+        put_varint(value_len, &mut record);
+        record.extend_from_slice(value);
+        record.push(0); // no headers
+        let record_len = u32::try_from(record.len())
+            .ok()
+            .and_then(|n| n.checked_mul(2))
+            .ok_or_else(|| Error::InvalidBatch("record too large".into()))?;
+        let mut records = Vec::with_capacity(record.len() + 5);
+        put_varint(record_len, &mut records);
+        records.extend_from_slice(&record);
+        let batch_len = i32::try_from(FIXED_BATCH_REMAINDER + records.len())
+            .map_err(|_| Error::InvalidBatch("batch too large".into()))?;
+        let batch = encode_batch(base_offset, batch_len, &records);
+        let mut header = [0u8; CONTAINER_HEADER_LEN];
+        header[..4].copy_from_slice(CONTAINER_MAGIC);
+        header[4] = 1;
+        header[8..12].copy_from_slice(&(batch.len() as u32).to_be_bytes());
+        header[12..20].copy_from_slice(&base_offset.get().to_be_bytes());
+        header[20..24].copy_from_slice(&1u32.to_be_bytes());
+        header[24..28].copy_from_slice(&crc32c(&batch).to_be_bytes());
+        let checksum = crc32c(&header[..28]);
+        header[28..32].copy_from_slice(&checksum.to_be_bytes());
+        let mut frame = Vec::with_capacity(header.len() + batch.len());
+        frame.extend_from_slice(&header);
+        frame.extend_from_slice(&batch);
+        Ok(frame)
+    }
+
+    #[test]
+    fn direct_encoder_preserves_previous_format_and_group_boundaries() {
+        let mut group = vec![1, 2, 3];
+        for offset in [0, 7, i64::MAX as u64] {
+            for length in [0, 1, 63, 64, 127, 128, 8191, 8192, 65536] {
+                let value: Vec<u8> = (0..length).map(|i| i as u8).collect();
+                let start = group.len();
+                encode_container_into(&mut group, Offset::new(offset), &value).unwrap();
+                assert_eq!(
+                    &group[start..],
+                    previous_encode_container(Offset::new(offset), &value).unwrap()
+                );
+            }
+        }
+        assert_eq!(&group[..3], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn detected_certified_corruption_latches_unavailable_and_preserves_evidence() {
+        let dir = temp_dir();
+        let mut log = Log::open(&dir).unwrap();
+        log.append(b"first").unwrap();
+        let path = dir.join("segment-000000.log");
+        let mut damaged = fs::read(&path).unwrap();
+        *damaged.last_mut().unwrap() ^= 1;
+        fs::write(&path, &damaged).unwrap();
+        let checkpoint = fs::read(dir.join("checkpoint")).unwrap();
+        // An out-of-range fetch need not scan unrelated data or poison health.
+        assert_eq!(log.read_batch(Offset::new(1)).unwrap(), None);
+        assert!(log.terminal_reason().is_none());
+        assert!(matches!(
+            log.read_batch(Offset::ZERO),
+            Err(Error::CertifiedCorruption { .. })
+        ));
+        assert!(log.terminal_reason().unwrap().contains("corruption"));
+        assert!(matches!(
+            log.append(b"second"),
+            Err(Error::StorageTerminal(_))
+        ));
+        assert!(matches!(
+            log.read_batch(Offset::ZERO),
+            Err(Error::StorageTerminal(_))
+        ));
+        assert_eq!(fs::read(&path).unwrap(), damaged);
+        assert_eq!(fs::read(dir.join("checkpoint")).unwrap(), checkpoint);
+        drop(log);
+        assert!(matches!(
+            Log::open(&dir),
+            Err(Error::CertifiedCorruption { .. })
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn byte_spaced_index_is_reconstructed_and_bounds_large_record_navigation() {
+        let dir = temp_dir();
+        assert_eq!(Log::open(&dir).unwrap().checkpoint_generation(), 0);
+        let values: Vec<Vec<u8>> = (0..32).map(|i| vec![i; 8192]).collect();
+        let refs: Vec<&[u8]> = values.iter().map(Vec::as_slice).collect();
+        let mut log = Log::open(&dir).unwrap();
+        log.append_group(&refs).unwrap();
+        assert_eq!(log.index_entries().len(), values.len());
+        assert_eq!(log.checkpoint_generation(), 1);
+        let expected = log.index_entries().to_vec();
+        drop(log);
+        let mut log = Log::open(&dir).unwrap();
+        assert_eq!(log.index_entries(), expected);
+        for (i, value) in values.iter().enumerate() {
+            let batch = log.read_batch(Offset::new(i as u64)).unwrap().unwrap();
+            assert_eq!(batch.offset, Offset::new(i as u64));
+            assert_eq!(&batch.records, value);
+        }
+        drop(log);
         fs::remove_dir_all(dir).unwrap();
     }
 
