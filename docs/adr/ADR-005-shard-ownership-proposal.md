@@ -54,6 +54,22 @@ ordering. See also https://man7.org/linux/man-pages/man2/io_uring_enter.2.html.
 
 ## Acceptance evidence before selection
 
+### Decision packet before actor implementation
+
+The 2026-11-11 roadmap prioritizes the following review deliverables. This is
+still a proposal, not a selected runtime or authorization for G2 code.
+
+| Decision | Required contract |
+| --- | --- |
+| Connection and partition owners | Ingress owns connection framing and response correlation; evaluate forwarding validated work to partition owners without sharing mutable append state. Bound outstanding work across all partitions touched by a connection. |
+| Buffer ownership | Evaluate immutable shared buffers; reservations follow allocations until the last holder and I/O completion release them. Account for retained backing capacity, cross-shard transfers and response/cache holders without double charging or losing charges. |
+| Admission and scheduling | Bound both bytes and requests; specify queue-full behavior, fair scheduling and deadlines. Cancellation after acceptance cannot imply non-commit. No waiting cycle may hold all reservations needed for progress. |
+| Ownership handoff | Fence the old owner, drain or reconcile in-flight writes, then activate the new owner. Shard-count changes must not change partition identity or offsets. A fixed initial mapping can defer live migration explicitly. |
+| Commit completion | Specify per-file durability and checkpoint completion, unknown outcomes, failed epochs and shutdown. Advance only covered partition boundaries; do not equate submission or write completion with persistence. |
+| One-shard mode | Exercise the same contracts without unnecessary cross-thread forwarding; keep background activity and idle-partition resource use bounded. |
+
+### Measurement and correctness evidence
+
 - State-machine tests for single ownership, cross-shard backpressure, cancellation,
   ownership transfer and memory accounting, including a one-shard deployment.
 - A reproducible buffered-I/O baseline with build, machine, filesystem, sync
