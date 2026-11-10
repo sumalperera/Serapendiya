@@ -24,12 +24,13 @@ mkfs.ext4 -F -q /dev/mapper/serapendiya-replay
 dmsetup message serapendiya-replay 0 mark mkfs
 mkdir -p /mnt/live /mnt/replay
 mount /dev/mapper/serapendiya-replay /mnt/live
+REPLAY_LOG_DIR=/mnt/live/init-log "$bin" --ignored --exact generate_initialization_trace --nocapture
 REPLAY_LOG_DIR=/mnt/live/log "$bin" --ignored --exact generate_trace --nocapture
 umount /mnt/live
 dmsetup remove serapendiya-replay
 # Replay each mark twice: normal kernel journal recovery and explicit fsck
 # repair must not influence one another. Each pass starts from a fresh image.
-for mark in acknowledged segment-write segment-sync checkpoint-write checkpoint-sync checkpoint-rename directory-sync second-ack; do
+for mark in init-before-open init-segment-sync init-checkpoint-write init-checkpoint-sync init-checkpoint-rename init-directory-sync init-return first-segment-write first-segment-sync first-checkpoint-write first-checkpoint-sync first-checkpoint-rename first-directory-sync first-ack acknowledged segment-write segment-sync checkpoint-write checkpoint-sync checkpoint-rename directory-sync second-ack; do
   for recovery in mount fsck; do
     echo "=== REPLAY $mark RECOVERY $recovery ==="
     truncate -s 0 /tmp/serapendiya-replay.img
@@ -53,7 +54,12 @@ for mark in acknowledged segment-write segment-sync checkpoint-write checkpoint-
       if (( fsck_status != 0 )); then exit "$fsck_status"; fi
     fi
     mount "$loop" /mnt/replay
-    REPLAY_LOG_DIR=/mnt/replay/log REPLAY_MARK="$mark" "$bin" --ignored --exact verify_replay --nocapture
+    case "$mark" in
+      init-*|first-*)
+        REPLAY_LOG_DIR=/mnt/replay/init-log REPLAY_MARK="$mark" "$bin" --ignored --exact verify_initialization_replay --nocapture ;;
+      *)
+        REPLAY_LOG_DIR=/mnt/replay/log REPLAY_MARK="$mark" "$bin" --ignored --exact verify_replay --nocapture ;;
+    esac
     umount /mnt/replay
     losetup -d "$loop"
     loop=""
