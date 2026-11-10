@@ -1,8 +1,8 @@
 # Review of 2026-11-09 architecture feedback
 
-Status: engineering assessment, not an accepted ADR or permission to implement
-future gates. Current storage-container code is uncommitted and experimental.
-Existing G1 acceptance remains open.
+Status: historical engineering assessment, not an accepted ADR or permission
+to implement future gates. The storage-container experiment was subsequently
+merged; its format remains experimental and G1 acceptance remains open.
 
 ## Findings for current G1 work
 
@@ -92,22 +92,15 @@ Historical v13-only authorization statements are historical, not current.
 
 ## Second review: concurrency, I/O and future replication
 
-- Redpanda documents thread-per-core scheduling, pinned application threads and
-  asynchronous cross-core message passing. Tokio `LocalSet` confines its local
-  tasks to one thread but does not by itself pin that thread to a CPU. ADR-005
-  should compare stable partition ownership, dedicated shard threads and a
-  work-stealing baseline, including CPU affinity, overload, blocking workers,
-  rebalancing and replayable tests. No runtime or pinning scheme is selected.
-  Sources: https://docs.redpanda.com/streaming/current/get-started/architecture/
-  and https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html
-- Kafka documents page-cache/sendfile fetches and states sendfile is not used
-  for SSL in that implementation. Redpanda's development-branch segment
-  appender describes direct I/O and bounded aligned buffers. Neither approach
-  guarantees better tail latency for our workloads. Compare buffered I/O,
-  optional preallocation and direct I/O with representative workloads before
-  selecting a mechanism. Sources:
-  https://kafka.apache.org/44/design/design/ and
-  https://github.com/redpanda-data/redpanda/blob/dev/src/v/storage/segment_appender.cc
+- Tokio `LocalSet` confines its local tasks to one thread but does not by
+  itself pin that thread to a CPU. ADR-005 should compare partition ownership,
+  dedicated shard threads and a work-stealing baseline, including CPU affinity,
+  overload, blocking workers, rebalancing and replayable tests. No runtime or
+  pinning scheme is selected. Source:
+  https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html
+- Compare buffered I/O, optional preallocation and direct I/O with representative
+  workloads before selecting a mechanism. A particular approach does not
+  guarantee better tail latency without measurements.
 - A stored Kafka batch may permit reduced conversion on fetch, but interleaved
   container headers, request framing, offset rewriting, filtering, compression
   and TLS affect whether a particular path can use sendfile. The experimental
@@ -124,8 +117,7 @@ Historical v13-only authorization statements are historical, not current.
   Do not change gap acceptance before a format and recovery design is accepted.
 - Internal queue and group logs can share storage infrastructure, but they
   still need explicit atomicity, ordering, retention, fencing and replay rules.
-  Kafka documents `__share_group_state`; this does not establish which Redpanda
-  releases support share groups. Source:
+  Kafka documents `__share_group_state`. Source:
   https://kafka.apache.org/42/getting-started/upgrade/
 - Specify bounded admission before allocation: global and per-shard byte and
   request budgets, large-frame rejection, ownership across asynchronous I/O,
@@ -134,10 +126,10 @@ Historical v13-only authorization statements are historical, not current.
 - Online format upgrades, mixed-version reads, rolling restarts and rollback
   require explicit compatibility and migration tests; version fields alone do
   not provide them.
-- Claims that Rust is inherently faster or memory-safe everywhere, that our
-  failure guarantees are stronger than Kafka/Redpanda, or that our first version
-  will be broadly comparable to Kafka are unverified. Rust code may use unsafe
-  blocks, have logical errors, allocate without bound or deadlock. Current code
+- Claims that Rust is inherently faster or memory-safe everywhere, or that our
+  failure guarantees or performance exceed other systems, are unverified. Rust
+  code may use unsafe blocks, have logical errors, allocate without bound or
+  deadlock. Current code
   includes an unsafe OS lock call. Any performance claim requires comparable
   benchmark conditions and raw results.
 
