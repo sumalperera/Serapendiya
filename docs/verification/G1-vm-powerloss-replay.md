@@ -19,7 +19,9 @@ output is in `G1-vm-replay-output.txt`.
 Every replayed image required filesystem repair: `e2fsck` recovered the ext4
 journal and corrected free block/inode accounting. Therefore the result is
 **recovery after filesystem repair**, not a claim that replayed filesystems
-mounted cleanly without intervention. The test does not explore every possible
+mounted cleanly without intervention. A subsequent comparison using normal
+mount recovery is documented in [G1-ext4-mount-comparison.md](G1-ext4-mount-comparison.md).
+The test does not explore every possible
 write ordering, sector tear, hardware cache behavior, XFS, or multiple
 partitions. It is not real power-cut certification or G1 acceptance.
 
