@@ -3,7 +3,8 @@
 Status: **PROPOSED — future design only.** No identity, authorization,
 idempotency, tenancy, audit or MCP code is authorized by this document. Exact
 security policies, persistent formats and gate scope require separate review
-and approval. The local blueprint's current-state table remains authoritative.
+and approval. The [roadmap](../roadmap.md) records public planning status;
+the local blueprint mirrors it. Neither changes recorded ADR acceptance.
 
 ## Threat model and boundary
 
@@ -128,7 +129,10 @@ records nor blocking every operation during an audit outage is universally safe.
   separately authorized compatibility gate. Any insecure local test mode must
   be explicit. Do not expose a production service before required security gates.
 - G4/G5: implement scoped security and hardened transport only after explicit
-  authorization and accepted security/storage ADRs.
+  authorization and accepted security/storage ADRs. Authentication and
+  authorization are prerequisites for any exposed network deployment, including
+  Kafka listeners; move that dependency forward explicitly if exposure is
+  needed before these gates. Their labels are not an insecure-deployment waiver.
 - R2 or later: MCP starts scoped and read-only. Mutating tools require separate
   authorization, outcome semantics and adversarial tests. MCP credentials must
   be audience-bound and not blindly forwarded to unrelated backends.
@@ -138,3 +142,11 @@ provenance, header compatibility, revocation during active connections,
 identity-bound stale ACKs, concurrent retries, crashes around deduplication,
 expired status, oversized requests, quotas, discovery leaks and malicious event
 instructions. No current capability or compatibility is claimed here.
+
+For history queries, apply the same permissions to time/metadata indexes as to
+fetch. Application correlation/causation fields remain untrusted and separate
+from attested identity. External artifact references need destination access
+control; never embed credentials in events or let an unrestricted adapter fetch
+an arbitrary user-supplied URL. Read-only replay cannot perform external effects;
+mutating replay needs destination idempotency or reconciliation as well as
+broker authorization.
