@@ -46,3 +46,8 @@ The script checks for the explicit opt-in and mounted scratch disks. Those
 checks are safeguards, not proof that a device is disposable. It runs fsck on
 replayed copies and never attempts to validate a real machine's power-loss
 behavior.
+
+For XFS, use a scratch data disk of at least 512 MiB and a 1 GiB trace disk,
+install `xfsprogs`, and set `SERAPENDIYA_FS=xfs`. The script performs normal
+journal recovery and `xfs_repair -n` after unmount; it does not zero or repair
+a dirty XFS log. See [G1-xfs-replay.md](G1-xfs-replay.md).

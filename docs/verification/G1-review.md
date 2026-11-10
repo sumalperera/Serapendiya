@@ -5,7 +5,35 @@ Review date: 2026-11-08. Reviewed repository commit
 ADR-003 and ADR-004. Verdict: **G1 acceptance is not established**. The issues
 below require resolution and review before durability claims or G1 acceptance.
 
-## Remediation in the working tree
+## Current evidence and remaining work (2026-11-10)
+
+The original review below is historical: its file references and descriptions
+refer to the reviewed 2026-11-08 commit, not the current tree. As of merged
+commit `77f76ea`, subsequent work added descriptor-relative directory handling,
+lifetime locking, a durable empty checkpoint before the first append, bounded
+groups and signed offset checks. The Rust 1.85 minimum is tested in [CI for 77f76ea](https://github.com/sumalperera/Serapendiya/actions/runs/42758511229), and
+independent kafka-python fixtures cover the current narrow batch shape.
+
+The evidence now includes actual ENOSPC and block-error tests on disposable
+ext4, plus `dm-log-writes` replay of initialization, first append and later
+append boundaries. Both normal ext4 journal recovery and the separately
+replayed fsck path preserved the records asserted by the harness. See
+[G1-init-replay.md](G1-init-replay.md) and
+[G1-ext4-mount-comparison.md](G1-ext4-mount-comparison.md).
+
+A subsequent [XFS replay](G1-xfs-replay.md) exercised the same 22 marks
+through normal XFS journal recovery; it does not add an explicit pre-mount
+repair comparison.
+
+G1 acceptance remains open. The replay covers selected boundaries and one
+virtual-disk storage model; it does not cover every initialization syscall,
+write reordering, torn sector, physical device or sustained failure. Explicit
+operator recovery for ambiguous initialization and stale temporary checkpoints,
+format and initialization ADR review, and independent review remain open.
+The current storage is Unix-only. A format-stability or production durability
+claim must not be inferred from these tests.
+
+## Historical remediation recorded on 2026-11-08
 
 The working tree adds an advisory exclusive lock, rejects a missing checkpoint
 beside a nonempty segment, syncs directory ancestors on open, enforces limits
@@ -71,7 +99,7 @@ supported filesystems. The acceptance evidence gaps below remain open.
    not be recovered. Reject overflow before writing and test the boundary. See
    `src/storage.rs` lines 203–212, 336–338 and 411–417.
 
-## Acceptance evidence gaps
+## Historical acceptance evidence gaps
 
 - The expanded process-abort test covers six append/checkpoint boundaries, but
   does not exercise sustained repeated failures or
