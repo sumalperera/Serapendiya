@@ -94,3 +94,6 @@ lock and no-follow operations are not protection against privileged or
 non-cooperating modification, and the FORMAT-marker policy is not implemented.
 See [the ADR reconciliation review](../verification/G1-adr-reconciliation.md)
 for evidence and outstanding decisions.
+
+For the current state table, proposed crash and rollback assumptions, and
+operator inspection procedure, see [ADR-004 recovery state proposal](ADR-004-recovery-state-proposal.md).
