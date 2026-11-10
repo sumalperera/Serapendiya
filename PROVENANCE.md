@@ -1,7 +1,9 @@
 # Provenance and dependency policy
 
-All application code in this repository is original work for Serapendiya. No
-upstream source, generated asset, or copied implementation is included.
+The repository maintains its own application implementation. Independent test
+fixtures generated with kafka-python are identified in the tests and the
+verification record; external dependencies are licensed separately. Review the
+provenance and license of any material before incorporating it.
 
 G0 dependencies are limited to the packages declared in `Cargo.toml`. Their
 exact resolved versions and checksums are committed in `Cargo.lock`. Before

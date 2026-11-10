@@ -16,9 +16,9 @@ customer-facing streaming workflow is still ahead.
 
 ### Next authorized decision
 
-The founder has selected a Redpanda-inspired direction: Kafka-compatible
-behavior at the client boundary and an original, versioned Serapendiya storage
-container. The concrete format and migration are proposed in
+The selected direction is a versioned Serapendiya storage container and
+Kafka-compatible behavior at the client boundary. The concrete format and
+migration are proposed in
 [the ADR-003 amendment](adr/ADR-003-hybrid-storage-proposal.md); an experimental
 implementation is in progress and must be reviewed with the
 [ADR-004 initialization proposal](adr/ADR-004-initialization-proposal.md).

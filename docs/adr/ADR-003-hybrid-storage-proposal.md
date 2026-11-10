@@ -11,11 +11,10 @@ production-readiness for either design.
 
 ## Direction and scope
 
-The founder requested a Redpanda-inspired design: a Serapendiya-owned,
-versioned storage container with Kafka-compatible record semantics at the
-protocol boundary. This proposal describes an original format, not Redpanda's
-on-disk format. The direction does not establish Kafka compatibility or approve
-replication, queues, Kafka networking, or other future gates.
+The proposed design uses a Serapendiya-owned, versioned storage container
+with Kafka-compatible record semantics at the protocol boundary. The direction
+does not establish Kafka compatibility or approve replication, queues, Kafka
+networking, or other future gates.
 
 The existing ADR-003 remains accepted for the prototype. This amendment must be
 reviewed before this experimental persistent format is declared stable.
@@ -101,8 +100,8 @@ protocol. No destructive migration is authorized by this proposal.
 4. Exercise initialization and append failure points, process interruption and
    the approved Linux ext4/XFS crash matrix. Never equate process aborts with
    power-loss verification.
-5. Review implementation provenance and licences. Redpanda's source is a design
-   reference, not permission to copy its code into the MIT project.
+5. Review implementation provenance and licences before incorporating any
+   external code, generated material or dependencies.
 
 The founder requested this direction and its implementation on 2026-11-09.
 The exact byte layout, Kafka subset, migration and checkpoint interaction remain
