@@ -7,6 +7,10 @@ below require resolution and review before durability claims or G1 acceptance.
 
 ## Current evidence and remaining work (2026-11-10)
 
+See also [ADR reconciliation](G1-adr-reconciliation.md), including a replay
+mark-verification gap discovered after the runs described below and the
+guarded reruns that followed.
+
 The original review below is historical: its file references and descriptions
 refer to the reviewed 2026-11-08 commit, not the current tree. As of merged
 commit `77f76ea`, subsequent work added descriptor-relative directory handling,

@@ -5,16 +5,18 @@ PR #13; FORMAT marker and non-mutating classification are not implemented.**
 
 The 2026-11-09 founder instruction authorized proceeding with the storage work.
 The implementation initializes an empty checkpoint before accepting writes;
-the full protocol below remains unaccepted and lacks simulated power-loss and
-filesystem-matrix evidence. Later FORMAT-marker and directory-lock proposals
-are assessed in `ADR-003-checksum-and-recovery-review.md`, not implemented.
+the full protocol below remains unaccepted. Selected simulated and ext4/XFS
+replay evidence is now available; it is not a complete power-loss matrix. The
+proposed FORMAT marker remains unimplemented. Directory-descriptor locking was
+added later, but does not implement the full proposed classification protocol;
+see `ADR-003-checksum-and-recovery-review.md`.
 The prototype writes experimental checkpoint version 2, distinct from
 the legacy version 1, before accepting writes. A valid empty version-2 checkpoint
 allows an uncertified partial first frame to be truncated; a version-1 checkpoint
 is rejected without truncating the segment. Regression tests cover a one-byte
 partial first append and legacy-checkpoint refusal. This is not the proposed
 FORMAT-marker or no-mutation-on-refusal protocol, and it has not been verified
-under power loss or accepted as a stable format.
+against every power-loss outcome or accepted as a stable format.
 If initialization fails with `checkpoint.tmp` present but no durable
 checkpoint, the prototype refuses to reopen instead of overwriting the
 ambiguous temporary file. An operator procedure and an identity-based safe
@@ -52,8 +54,11 @@ but initialization failures with ambiguous temporary files still fail closed.
    validate the certified prefix and truncate only the uncertified tail.
 5. Legacy version-1 checkpoints and segments are refused without truncation;
    they require a separately approved migration or operator procedure. An
-   existing empty segment with no checkpoint is treated as new; a nonempty
-   segment with no checkpoint remains ambiguous and fails closed.
+   existing empty segment with no checkpoint is a proposed restart case, not
+   current behavior. The current code refuses any nonempty directory lacking a
+   checkpoint unless it just created the lock as part of this initialization.
+   The proposal needs an identity proof before safe automatic restart can be
+   accepted; a nonempty segment without a checkpoint remains ambiguous.
 
 The experimental checkpoint version changes from 1 to 2, and the segment format
 changes. If all durable metadata and data disappear together,
@@ -76,3 +81,16 @@ protocol does not claim detection of complete external deletion or storage loss.
 The complete initialization and classification protocol remains proposed; its
 format and acceptance requirements require review before they are treated as a
 stable durability contract.
+
+## Implementation reconciliation (2026-11-10)
+
+This remains a proposal. The current code holds a directory descriptor and
+advisory locks, requires an existing parent when creating the log directory,
+and installs a version-2 empty checkpoint before returning from a new open.
+It refuses an existing lock or segment without a checkpoint, even if the
+segment is empty; it preserves an existing `checkpoint.tmp` and blocks new
+appends until inspection. These are stricter than step 5 above. The directory
+lock and no-follow operations are not protection against privileged or
+non-cooperating modification, and the FORMAT-marker policy is not implemented.
+See [the ADR reconciliation review](../verification/G1-adr-reconciliation.md)
+for evidence and outstanding decisions.
