@@ -24,7 +24,7 @@ accepted ADR, completed gate or authorization to implement later gates.
 | --- | --- | --- |
 | G0 foundation | Present; historical evidence remains in the verification records. | Preserve provenance and supported-toolchain checks. |
 | G1 storage | Implementation authorized; acceptance remains open. | Review ADR-003/004, recovery assumptions and operator guidance; obtain independent review. |
-| Checksum comparison | Synthetic checksum experiment recorded. | Compare a compatible library implementation and measure actual append, fetch and recovery before selecting optimizations. |
+| Checksum comparison | Synthetic coverage experiment and compatible library integration measured locally. | Review [storage measurements](benchmarks/crc-library-comparison.md); Linux CI and broader target/performance coverage remain outstanding. |
 | G2 and later | Planned; implementation requires separate authorization. | Accept applicable ADRs and define executable acceptance criteria first. |
 
 This table is the public planning status; it does not supersede recorded ADR
@@ -114,6 +114,13 @@ idempotency/reconciliation. The platform cannot guarantee exactly-once payment,
 email or tool execution merely by retaining an event.
 
 ## Technology and reuse priorities
+
+Every feature or material redesign follows the standing engineering evaluation
+process in [the reuse plan](architecture/technology-reuse-plan.md). Before coding, review applicable established
+approaches and reusable components, record the chosen approach and deliberate
+differences, and define the correctness/performance evidence. This rule applies
+across all gates without granting implementation authority for future gates.
+
 
 Use [the technology reuse plan](architecture/technology-reuse-plan.md) as the
 decision checklist before building a subsystem. Reuse maintained libraries for

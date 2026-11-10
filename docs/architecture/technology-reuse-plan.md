@@ -6,6 +6,15 @@ for later-gate code. See [the roadmap](../roadmap.md) for scope and sequencing.
 
 ## Reuse policy
 
+The founder's standing instruction is to evaluate relevant established
+streaming/storage approaches and reusable components before implementing a
+feature or material redesign. Use
+[the feature review template](feature-review-template.md) to record sources,
+alternatives, selection, deliberate differences and validation. Apply this
+throughout the project, including improvements to existing features; the
+candidate list below is a starting point, not an exhaustive technology menu.
+
+
 Start with established mechanisms and maintained implementations. A widely used
 library is evidence for its component, not proof of our integration or workload.
 Review exact versions, upstream maintenance, advisories, MSRV, platform support,
@@ -61,6 +70,11 @@ than implementing these algorithms in the broker. Verify supported versions,
 bounded decoding and compatibility then; no speculative dependencies now.
 
 ## First optimization experiment
+
+Implementation follow-up: the existing wrapper now uses pinned `crc32c` 0.6.9.
+See [compatibility verification](../verification/G1-crc-library.md) and
+[local storage measurements](../benchmarks/crc-library-comparison.md).
+This selects the checksum implementation, not a new coverage or container format.
 
 Separate algorithm implementation from persistent-format changes. Evaluate a
 library CRC against the current bitwise CRC on exactly the same bytes first.

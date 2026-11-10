@@ -19,6 +19,7 @@ name = "streamctl"
 path = "src/bin/streamctl.rs"
 
 [dependencies]
+crc32c = "=0.6.9"
 clap = { version = "4.5.51", features = ["derive"] }
 rustix = { version = "=1.1.6", features = ["fs"] }
 serde = { version = "1.0.228", features = ["derive"] }
