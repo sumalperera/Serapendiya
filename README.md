@@ -49,6 +49,9 @@ The open-source repository contains a G0 foundation and experimental G1 storage 
 - Fault-injection and process-level crash-recovery tests.
 - Derived sparse indexes, bounded group commit, and Linux Docker CI.
 
+The experimental storage currently supports Unix platforms only; non-Unix
+storage opens fail closed.
+
 G1 acceptance and durability guarantees remain under review. The project is not
 yet a broker or production MVP. Kafka networking, real producers and consumers,
 queues, replay UX, and the end-to-end developer workflow remain future gates.
