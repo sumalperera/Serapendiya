@@ -97,7 +97,7 @@ fn legacy_frames_and_new_layout_refusal() {
         );
     }
     drop(old);
-    for name in ["empty", "two", "migrated"] {
+    for name in ["empty", "two", "migrated", "nonunit-base"] {
         assert!(verify_manifest(
             &fs::read(root.join(name).join("manifest")).unwrap()
         ));
@@ -119,19 +119,47 @@ fn legacy_frames_and_new_layout_refusal() {
     for name in ["two", "migrated", "corrupt-payload"] {
         let manifest = fs::read(root.join(name).join("manifest")).unwrap();
         for (i, payload) in [b"alpha".as_slice(), b"beta".as_slice()].iter().enumerate() {
-            let frame = fs::read(root.join(name).join(format!("segment-{i:020}.log"))).unwrap();
+            let start = 48 + 24 * i;
+            let base = u64::from_be_bytes(manifest[start..start + 8].try_into().unwrap());
+            let frame = fs::read(root.join(name).join(format!("segment-{base:020}.log"))).unwrap();
             assert_eq!(
                 u64::from_be_bytes(manifest[64 + 24 * i..72 + 24 * i].try_into().unwrap()),
                 frame.len() as u64
             );
             assert_eq!(
-                verify_frame(&frame, i as u64, payload),
+                verify_frame(&frame, base, payload),
                 name != "corrupt-payload" || i != 0
             );
         }
     }
+    let name = "nonunit-base";
+    let manifest = fs::read(root.join(name).join("manifest")).unwrap();
+    for i in 0..2 {
+        let start = 48 + 24 * i;
+        let base = u64::from_be_bytes(manifest[start..start + 8].try_into().unwrap());
+        let end = u64::from_be_bytes(manifest[start + 8..start + 16].try_into().unwrap());
+        let segment = fs::read(root.join(name).join(format!("segment-{base:020}.log"))).unwrap();
+        assert_eq!(
+            u64::from_be_bytes(manifest[start + 16..start + 24].try_into().unwrap()),
+            segment.len() as u64
+        );
+        let mut pos = 0;
+        for offset in base..end {
+            let len =
+                u32::from_be_bytes(segment[pos + 8..pos + 12].try_into().unwrap()) as usize + 32;
+            let value = if offset == 5 {
+                b"beta".as_slice()
+            } else {
+                b"alpha".as_slice()
+            };
+            assert!(verify_frame(&segment[pos..pos + len], offset, value));
+            pos += len;
+        }
+        assert_eq!(pos, segment.len());
+    }
     for name in [
         "empty",
+        "nonunit-base",
         "two",
         "migrated",
         "bad-checksum",

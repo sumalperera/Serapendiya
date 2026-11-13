@@ -22,6 +22,7 @@ def u64(n): return struct.pack('>Q', n)
 
 
 def frame(offset, value):
+    # Both record-length varints remain one byte for these fixture values.
     assert len(value) < 50
     record = bytes([2 * (6 + len(value)), 0, 0, 0, 1, 2 * len(value)]) + value + b'\0'
     batch = (struct.pack('>qiibIhiqqqhii', offset, 49 + len(record), 0, 2, 0,
@@ -55,6 +56,9 @@ two = {'.lock': b'', 'manifest': manifest([(0, 1, len(f0)), (1, 2, len(f1))]), s
 directory(root, 'empty', {'.lock': b'', 'manifest': manifest([(0, 0, 0)]), seg0: b''})
 directory(root, 'two', two)
 directory(root, 'migrated', two)
+five = b''.join(frame(i, b'alpha') for i in range(5))
+sixth = frame(5, b'beta')
+directory(root, 'nonunit-base', {'.lock': b'', 'manifest': manifest([(0, 5, len(five)), (5, 6, len(sixth))]), seg0: five, 'segment-00000000000000000005.log': sixth})
 checkpoint = b'SRLG\x02\0\0\0' + u64(len(f0 + f1)) + u64(2) + u64(1)
 directory(root, 'legacy-source', {'.lock': b'', 'checkpoint': checkpoint + u32(crc(checkpoint)), 'segment-000000.log': f0 + f1})
 bad = dict(two)
