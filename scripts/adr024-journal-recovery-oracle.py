@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Review model for proposed journal decisions; no disk I/O or crash simulation."""
 from dataclasses import dataclass, replace
+from pathlib import Path
 import unittest
 
 
@@ -51,6 +52,37 @@ def decision(s):
 
 
 class Cases(unittest.TestCase):
+    def test_documented_priority_rows_exist(self):
+        # Guard against accidental table renumbering/removal and obvious wording
+        # drift. This is not a semantic proof of equivalence or independent review.
+        packet = (Path(__file__).resolve().parents[1] / "docs/adr/ADR-024-journal-rotation-candidate.md").read_text()
+        section = packet.split("### Candidate opening decision order", 1)[1]
+        section = section.split("Rows 10–12 are proposals", 1)[0]
+        rows = {}
+        for line in section.splitlines():
+            cells = [cell.strip() for cell in line.split("|")]
+            if len(cells) >= 5 and cells[1].isdigit():
+                rows[int(cells[1])] = (cells[2].lower(), cells[3].lower())
+        markers = {
+            1: ("layout cannot be identified", "refuse"),
+            2: ("genuinely empty", "initialize"),
+            3: ("nonempty directory", "refuse"),
+            4: ("legacy single-segment", "legacy"),
+            5: ("candidate checkpoint", "refuse"),
+            6: ("temporary checkpoint", "refuse"),
+            7: ("extra unbound epoch", "refuse"),
+            8: ("certified journal", "refuse"),
+            9: ("retired file exists", "refuse"),
+            10: ("retired file absent", "open"),
+            11: ("uncertified suffix", "truncate"),
+            12: ("bound retired journal exists", "preserve"),
+        }
+        self.assertEqual(set(rows), set(markers))
+        for priority, (condition, outcome) in markers.items():
+            with self.subTest(priority=priority):
+                self.assertIn(condition, rows[priority][0])
+                self.assertIn(outcome, rows[priority][1])
+
     def test_rows_and_precedence(self):
         clean = State()
         cases = [

@@ -176,6 +176,13 @@ chosen; an eventually full filesystem still needs backpressure. Preserving an
 artifact forever is not a disk bound. Neither automatic move nor unlink is
 authorized by this comparison.
 
+If a `retired/` directory is later accepted, the new-layout directory classifier
+must explicitly validate that directory and its permitted contents without
+following unsafe links. The existing old reader's strict whitelist must remain
+unchanged; extend old-reader refusal fixtures to cover both empty and populated
+`retired/` directories. This is future validation work, not permission to add
+the directory or modify the current reader's recovery behavior.
+
 The review proposes an idempotent automatic move: if the specifically bound
 retired journal remains live, retry a same-filesystem no-replace move; if it is
 already in `retired/`, validate and treat it as non-authoritative. This could
