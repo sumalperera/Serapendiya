@@ -3,6 +3,12 @@
 Status: **WORKING DRAFT; not an accepted format or implementation authority.**
 This narrows the first segmentation decision in [ADR-024](ADR-024-storage-lifecycle-and-commit-proposal.md). It does not approve checksum changes, persisted indexes, deferred verification, retention or a commit coordinator.
 
+Planning update, 2026-11-13: the founder selected a metadata journal as the
+direction to develop and revisit after matched measurements. This single-manifest
+candidate remains an unaccepted comparison baseline; its proposed 4,096-entry
+limit and authority protocol are not automatically the journal's design. See
+[the alternatives review](ADR-024-segment-cap-alternatives-review.md).
+
 ## Existing boundary
 
 At `c5617d3`, `src/storage.rs` uses one `segment-000000.log` and a version-2 checkpoint. A commit syncs segment data before replacing and syncing the checkpoint. Recovery verifies every frame in the certified prefix before truncating its uncertified suffix. The group limits are 1,024 batches and 16 MiB. Checkpoint generation is diagnostic, not proof of freshness. See [the recovery state proposal](ADR-004-recovery-state-proposal.md) for refusal and rollback limitations.
