@@ -8,6 +8,8 @@ sync-before-ACK, full certified-payload verification, absolute offsets, no
 implicit event retention, and evidence on ambiguous recovery. An operator or
 external process can still restore a coherent older checkpoint and files; no
 local identity, generation or CRC establishes freshness or fences a writer.
+The [authority and quarantine comparison](ADR-024-authority-quarantine-comparison.md)
+evaluates a separately proposed cross-directory move and its failure states.
 
 ## Design choice under review
 

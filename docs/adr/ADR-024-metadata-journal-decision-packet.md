@@ -29,6 +29,10 @@ record as authority alone is not yet shown to preserve the existing contract.
 
 ### Authority candidates
 
+The [two-sync and quarantine comparison](ADR-024-authority-quarantine-comparison.md)
+adds failure-model examples and compares J1 and J2 without treating journal
+framing or a strict-refuse switch as proof of an acknowledged boundary.
+
 | Candidate | Commit authority and trade-off |
 | --- | --- |
 | **J1: bounded journal plus fixed replacement checkpoint** | Checkpoint binds journal identity and certified journal byte length, plus the final offset. Data is synced before journal record; journal is synced before checkpoint replacement and directory sync; ACK follows the final barrier. Existing certified-range reasoning extends to the journal, but two file syncs plus checkpoint sync and directory sync remain. The per-commit authority write is fixed size, not proof of a latency improvement. |
