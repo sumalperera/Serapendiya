@@ -96,12 +96,36 @@ file is not itself accepted as permission to accept an invalid active state.
 
 ## Proposed transition
 
+The following illustrates the candidate ordering, not a verified protocol:
+
+```mermaid
+sequenceDiagram
+    participant Owner
+    participant New as New journal
+    participant CP as Checkpoint
+    participant Dir as Log directory
+    participant Old as Retired journal
+    Owner->>New: create, write snapshot, sync
+    Owner->>Dir: sync new journal entry
+    Owner->>CP: write and sync temporary
+    Owner->>CP: rename replacement
+    Owner->>Dir: sync checkpoint publication
+    Note over Owner,Old: Cleanup is a separate unaccepted decision
+    Owner->>Old: validate and unlink if authorized
+    Owner->>Dir: sync removal
+```
+
 1. Under the directory and lock-file locks, verify active authority and state,
    including all certified journal records and segment frames. Require no
    unexpected artifacts or uncertified suffixes. If the checkpoint already
    names a retired file, perform the reviewed cleanup below or refuse before
    creating another journal. Check the next epoch, sequence, snapshot size and
    capacity before mutation.
+   If a validated checkpoint names a retired file that is already absent and
+   no other artifact is unexplained, the candidate treats that as its defined
+   post-cleanup state: no unlink is needed. Before a new rotation, sync the
+   current checkpoint file and containing directory; if either fails, refuse.
+   Absence does not prove who removed the file or detect external rollback.
 2. Exclusively create the next epoch file and write its header plus one snapshot
    of the complete current certified segment state. Its first sequence is the
    old last sequence + 1. Sync the new file, then sync the directory entry.
@@ -158,7 +182,26 @@ This is a review oracle specification, not implemented recovery. Acquire the
 directory lock before examining entries; for an existing directory acquire its
 existing lock-file lock before recovery. For an empty directory only, initialize
 under the separate creation protocol. Apply the first matching condition; no
-cleanup or truncation occurs during classification.
+cleanup or truncation occurs during classification. Row 11 describes a
+separately authorized recovery action after classification and verification.
+
+```mermaid
+flowchart TD
+    A[Lock and inspect] --> B{Unsafe or ambiguous artifact?}
+    B -- Yes --> R[Refuse and preserve]
+    B -- No --> C{Authority and certified history valid?}
+    C -- No --> R
+    C -- Yes --> D{Retired journal present?}
+    D -- No --> E{Uncertified suffix?}
+    E -- No --> O[Open certified state]
+    E -- Yes --> T[Candidate: truncate and sync after validation]
+    D -- Yes --> F{Retired journal validates and no suffix?}
+    F -- No --> R
+    F -- Yes --> G[Preserve or separately authorized cleanup]
+```
+
+The diagram summarizes the journal branch only; the ordered table below governs
+legacy dispatch, initialization, missing retired files and precedence.
 
 | Priority | Observation | Required candidate result |
 | --- | --- | --- |
@@ -248,6 +291,7 @@ Run the fixture check on disposable generated copies:
 
 ```sh
 python3 scripts/adr024-journal-fixtures.py /tmp/adr024-journal-review
+python3 scripts/adr024-journal-fixtures.py --verify /tmp/adr024-journal-review
 ADR024_JOURNAL_FIXTURES=/tmp/adr024-journal-review cargo test --locked --test adr024_journal_fixture_review -- --ignored
 python3 scripts/adr024-journal-recovery-oracle.py
 ```
@@ -258,6 +302,30 @@ exercises 12 abstract decisions and selected collisions; it does not inspect
 files or model actual syncs, crashes or system-call failures. Its rules were
 written alongside this proposal, not independently reviewed. Full fixtures,
 independent protocol review and implementation-level fault tests remain open.
+
+### Operational cost and cleanup alternatives
+
+An initial empty 16 MiB journal fits about 233,015 72-byte append records, less
+when other records occur. Rotation leaves a bound retired file. Under the
+candidate's current step 4, if automatic cleanup has not been separately
+accepted and the file remains present, **writes stop at the first rotation**;
+it is not safe to promise a second full journal's worth of progress. An
+interrupted pre-publication rotation can also stop the partition on its first
+occurrence. Any intervention is separately reviewed and authorized.
+
+While the retired file remains, a restart must verify its entire certified
+range and records as well as the active journal, up to 16 MiB each under the
+candidate bounds, in addition to full historical event-payload verification.
+Include this worst case, no-retired case and rotation/cleanup tails in matched
+startup and latency measurements.
+
+An alternative is an additional checkpoint publication after cleanup that
+records an explicit `retired-and-cleaned` state. This may simplify later state
+interpretation but creates another file-sync/rename/directory-sync boundary
+and failure matrix; it needs precise bytes and correctness review. Neither an
+explicit flag nor a missing file proves that an external rollback or
+uncooperative deletion did not occur. The current candidate keeps the binding
+until the next rotation; this trade-off is open, not an accepted decision.
 
 The user must accept exact format, retirement behavior and recovery semantics
 before implementation. No operator mutation, retention, coordinator or G1 gate

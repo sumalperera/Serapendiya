@@ -42,6 +42,14 @@ metadata bytes but J1 still does a replacement and directory sync on every
 commit; whether it improves p99 latency is unknown. If that cost defeats the
 goal, evaluate J2/J3 or the small topology checkpoint alternative with their
 own full correctness evidence. Do not assume upstream success proves integration.
+Compared with the existing per-group segment-sync, checkpoint-file-sync and
+directory-sync sequence, J1 adds a journal-file sync on the ordinary commit
+path. This extra barrier is a concrete concern, not a proof that every measured
+latency must be higher: write size, filesystem, scheduling and workload also
+matter. Pre-register J1 as a candidate that may fail the performance revisit
+even if correct; compare barrier counts and matched latency/throughput before
+choosing it long-term. Batching or deferring checkpoint publication needs a
+separately specified ACK and certified-tail protocol; J1 does not authorize it.
 The [96-byte explicit-retirement candidate](ADR-024-journal-rotation-candidate.md)
 extends J1 for review; the 64-byte checkpoint below is its earlier sketch, not
 the checkpoint for that rotation candidate. Neither is accepted.

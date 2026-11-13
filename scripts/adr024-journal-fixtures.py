@@ -5,6 +5,7 @@ The two event frames come from the previously recorded ADR-024 fixtures. No
 production journal, migration or recovery code is exercised by this generator.
 """
 import pathlib
+import hashlib
 import struct
 import sys
 
@@ -61,8 +62,28 @@ def put(root, name, files):
 
 
 assert crc(b"123456789") == 0xE3069283
+if len(sys.argv) == 3 and sys.argv[1] == "--verify":
+    root = pathlib.Path(sys.argv[2])
+    inventory = ROOT / "docs/verification/adr024-journal-fixtures.sha256"
+    expected = {}
+    for line in inventory.read_text().splitlines():
+        digest, name = line.split("  ", 1)
+        expected[name] = digest
+    actual = {
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in root.rglob("*") if path.is_file()
+    }
+    if actual != expected:
+        raise SystemExit("fixture files or SHA-256 values do not match the inventory")
+    print(f"Verified {len(actual)} fixture files against the inventory")
+    sys.exit(0)
+if len(sys.argv) != 2:
+    raise SystemExit("usage: adr024-journal-fixtures.py OUTPUT | --verify DIRECTORY")
 root = pathlib.Path(sys.argv[1])
-root.mkdir()  # never overwrite an existing review set
+try:
+    root.mkdir()  # never overwrite an existing review set
+except FileExistsError:
+    raise SystemExit(f"output already exists; choose a new path: {root}") from None
 source = ROOT / "docs/verification/adr024-fixtures/two"
 segment0 = "segment-00000000000000000000.log"
 segment1 = "segment-00000000000000000001.log"

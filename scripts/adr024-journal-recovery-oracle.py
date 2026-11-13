@@ -14,7 +14,7 @@ class State:
     temporary: bool = False
     file_set_valid: bool = True
     certified_valid: bool = True
-    retired: str = "absent"  # absent, valid, invalid
+    retired: str = "no_binding"  # no_binding, bound_missing, valid, invalid
     suffix: bool = False
 
 
@@ -43,7 +43,7 @@ def decision(s):
         return 12, "refuse_pending_order"
     if s.retired == "valid":
         return 12, "preserve_or_reviewed_cleanup"
-    if s.retired != "absent":
+    if s.retired not in ("no_binding", "bound_missing"):
         raise ValueError("invalid retired state")
     if s.suffix:
         return 11, "verify_then_truncate_and_sync"
@@ -64,6 +64,8 @@ class Cases(unittest.TestCase):
             (replace(clean, certified_valid=False), (8, "refuse")),
             (replace(clean, retired="invalid"), (9, "refuse")),
             (clean, (10, "open")),
+            (replace(clean, retired="bound_missing"), (10, "open")),
+            (replace(clean, retired="bound_missing", suffix=True), (11, "verify_then_truncate_and_sync")),
             (replace(clean, suffix=True), (11, "verify_then_truncate_and_sync")),
             (replace(clean, retired="valid"), (12, "preserve_or_reviewed_cleanup")),
             (replace(clean, retired="valid", suffix=True), (12, "refuse_pending_order")),

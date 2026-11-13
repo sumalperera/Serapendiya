@@ -13,7 +13,9 @@ fn checksum(b: &[u8]) -> bool {
 }
 
 // Fixture-focused replay, independently written from the Python generator.
-// This does not classify a directory or establish any durability outcome.
+// This does not classify a directory, count frames in every append range, or
+// establish any durability outcome; frame count is checked for these examples.
+const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024; // Candidate bound in ADR-024.
 type SegmentEntry = (u64, u64, u64);
 fn replay_fixture(journal: &[u8]) -> Option<(u64, Vec<SegmentEntry>)> {
     if journal.len() < 40 || &journal[..8] != b"SRJ1\x01\0\0\0" || !checksum(&journal[..40]) {
@@ -89,6 +91,9 @@ fn replay_fixture(journal: &[u8]) -> Option<(u64, Vec<SegmentEntry>)> {
                 active.1 = fields[4];
             }
             3 if payload.len() == 16 && !entries.is_empty() => {
+                if entries.len() >= 4096 {
+                    return None;
+                }
                 let active = *entries.last()?;
                 let next = u64be(&payload[8..]);
                 if active.0 != u64be(&payload[..8]) || active.0 == active.1 || next != active.1 {
@@ -117,8 +122,14 @@ fn checkpoint_and_active_valid(dir: &Path) -> bool {
     let Ok(active) = fs::read(dir.join(format!("journal-{epoch:020}.log"))) else {
         return false;
     };
-    let len = u64be(&cp[32..40]) as usize;
-    if !(40..=16 * 1024 * 1024).contains(&len) || len > active.len() {
+    let raw_len = u64be(&cp[32..40]);
+    if !(40..=MAX_JOURNAL_BYTES).contains(&raw_len) {
+        return false;
+    }
+    let Ok(len) = usize::try_from(raw_len) else {
+        return false;
+    };
+    if len > active.len() {
         return false;
     }
     let active = &active[..len];
@@ -163,7 +174,10 @@ fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
 #[test]
 #[ignore = "requires explicitly generated disposable fixture directories"]
 fn multi_epoch_fixture_checks_and_old_reader_refusal() {
-    let root = std::path::PathBuf::from(std::env::var_os("ADR024_JOURNAL_FIXTURES").unwrap());
+    let root = std::path::PathBuf::from(
+        std::env::var_os("ADR024_JOURNAL_FIXTURES")
+            .expect("set ADR024_JOURNAL_FIXTURES to a disposable generated fixture directory"),
+    );
     for name in [
         "rotation-with-retired",
         "rotation-after-cleanup",
