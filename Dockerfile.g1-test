@@ -5,6 +5,7 @@ WORKDIR /workspace
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src ./src
 COPY tests ./tests
+COPY docs/adr/ADR-024-metadata-journal-decision-packet.md docs/adr/ADR-024-journal-rotation-candidate.md ./docs/adr/
 
 RUN cargo build --locked
 RUN cargo fmt --all --check
