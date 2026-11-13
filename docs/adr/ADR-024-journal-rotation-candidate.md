@@ -152,6 +152,49 @@ preserved. That availability cost and an operator path are explicit release
 decisions. A coherent restored old authority plus old data remains indistinguishable
 from a legitimate earlier state.
 
+### Candidate opening decision order
+
+This is a review oracle specification, not implemented recovery. Acquire the
+directory lock before examining entries; for an existing directory acquire its
+existing lock-file lock before recovery. For an empty directory only, initialize
+under the separate creation protocol. Apply the first matching condition; no
+cleanup or truncation occurs during classification.
+
+| Priority | Observation | Required candidate result |
+| --- | --- | --- |
+| 1 | Open, enumeration or required lock fails; layout cannot be identified | Refuse, preserving artifacts; an I/O failure alone is not proof of corruption. |
+| 2 | Genuinely empty directory | Initialize only under the reviewed initialization protocol; loss of former contents is outside local rollback detection. |
+| 3 | Nonempty directory with missing/unsafe lock, symlink, nonregular or multiply linked storage entry, unknown name or mixed layouts | Refuse and preserve. A quarantine-looking filename has no special authority. |
+| 4 | Recognized legacy single-segment layout only | Dispatch to existing legacy rules, without implicit migration or new-format cleanup. |
+| 5 | Missing, malformed, unsupported, unreadable, bad-checksum or invariant-violating candidate checkpoint | Refuse and preserve all files. The old 64-byte sketch is not an accepted candidate checkpoint. |
+| 6 | Any temporary checkpoint, regardless of content, generation or apparent validity | Refuse and preserve, even if all other files are valid. |
+| 7 | Missing active journal, extra unbound epoch or segment, missing referenced segment, or any unexplained artifact | Refuse and preserve. An old checkpoint plus a new epoch is an orphan case. |
+| 8 | Invalid certified journal header or record, short certified file, sequence or checkpoint mismatch, invalid snapshot or certified segment frame, sealed length mismatch | Refuse and preserve; never truncate a suffix before all certified history validates. |
+| 9 | Checkpoint retirement binding present and named retired file exists but has wrong identity, length, fingerprint, records, sequence or reconstructed state | Refuse and preserve; do not clean up based on filename. |
+| 10 | All certified state validates; no unexpected artifacts; no suffixes; retired file absent or no retirement binding | Open at certified boundary. A missing named retired file is allowed only by the proposed retirement rule and does not detect external rollback. |
+| 11 | As row 10, but active journal and/or active segment has an uncertified suffix | After verifying all certified history, truncate and sync the journal suffix first, then the active segment suffix. Any failure refuses; a completed first truncation or failed truncation may already have changed an uncertified suffix. |
+| 12 | All certified state validates and exactly the bound retired journal exists | Preserve it unless the separately accepted cleanup protocol is enabled. Before cleanup re-sync active authority and directory, then validate and unlink only the named bound file and sync directory. Failure refuses and may have an unknown unlink outcome. |
+
+Rows 10–12 are proposals, not proof that an unacknowledged operation did or did
+not persist. A returned ACK follows the complete barrier; a returned error after
+publication starts can be unknown. A present retired journal plus an active
+suffix requires both validation and separately reviewed ordering of cleanup
+versus suffix truncation: **refuse without mutation until that ordering is
+decided**. Likewise, a missing retired journal is accepted only under the
+proposed checkpoint retirement semantics; it is not evidence of an external
+backup, successful earlier cleanup or absence of rollback. Rows 10–12 are
+mutually exclusive after these qualifications.
+
+Required deterministic cases include each row and collisions: bad authority
+plus temp, temp plus orphan, old checkpoint plus fully synced new journal,
+new checkpoint plus retired file, missing active data plus suffix, early sealed
+corruption plus suffix, malformed retired file plus valid snapshot, valid
+retired file plus suffix, and failures before/after every truncation, unlink,
+file sync, directory sync and rename. A final error after mutation may leave
+only uncertified suffixes or the explicitly retired file changed; no test may
+claim a failed syscall implies no mutation. Explicitly compare all preexisting
+certified bytes and acknowledged offsets across each modeled restart.
+
 ## Required review and evidence
 
 - Independently review whether the full prior-state reconstruction and CRC
@@ -175,6 +218,46 @@ from a legitimate earlier state.
 - Compare this candidate against the single-manifest and small-checkpoint
   alternatives with matched sync-before-ACK settings, including journal rotation
   tail latency, memory and full-history startup. No performance claim is made.
+
+### Review artifacts and their limits
+
+[The generator](../../scripts/adr024-journal-fixtures.py) creates a two-segment,
+two-epoch example with real pre-existing event frames, prior-epoch snapshot,
+append, roll and append records, and a new-epoch snapshot/checkpoint. It also
+generates post-cleanup, orphan, temporary, missing-file, truncated, checksum,
+retired-corruption and dual-suffix examples. Preserved [fixture directories](../verification/adr024-journal-fixtures)
+and their [SHA-256 inventory](../verification/adr024-journal-fixtures.sha256)
+are review artifacts. The generator is a standalone bitwise CRC implementation,
+not production or migration code; event frames are reused from the earlier
+fixture corpus. This example is constructed directly, not produced by actual
+rotation or migration.
+
+The separately written [Rust fixture test](../../tests/adr024_journal_fixture_review.rs)
+uses the project's CRC library to check the candidate checkpoint and active
+snapshot framing for this fixture family, replays the old multi-record journal,
+compares its reconstructed state to the new snapshot, checks segment and retired
+file checksums, and attempts to open all directories using the old-format reader
+while comparing names and bytes. The verifier is deliberately limited: it is
+not a general journal parser, does not check all record and directory semantics,
+does not prove that fixture files meet this entire specification, and does not
+simulate recovery or crashes. A separately compiled
+test using the archived `c5617d3` storage source passed locally on macOS; it
+does not check every metadata field or other platforms.
+
+Run the fixture check on disposable generated copies:
+
+```sh
+python3 scripts/adr024-journal-fixtures.py /tmp/adr024-journal-review
+ADR024_JOURNAL_FIXTURES=/tmp/adr024-journal-review cargo test --locked --test adr024_journal_fixture_review -- --ignored
+python3 scripts/adr024-journal-recovery-oracle.py
+```
+
+The generator refuses to overwrite an existing path. The separate
+[classification model](../../scripts/adr024-journal-recovery-oracle.py)
+exercises 12 abstract decisions and selected collisions; it does not inspect
+files or model actual syncs, crashes or system-call failures. Its rules were
+written alongside this proposal, not independently reviewed. Full fixtures,
+independent protocol review and implementation-level fault tests remain open.
 
 The user must accept exact format, retirement behavior and recovery semantics
 before implementation. No operator mutation, retention, coordinator or G1 gate
