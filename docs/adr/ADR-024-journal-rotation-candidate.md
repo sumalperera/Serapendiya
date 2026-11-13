@@ -171,6 +171,42 @@ and preserve all artifacts. This procedure does not repair uncertain appends.
 | Any authority plus unexpected epoch, temp, missing active journal or segment, or corrupt certified range | Refuse and preserve; apply no cleanup. |
 | Crash/failure during unlink or directory sync after it | On restart apply the present/absent rows above. The durable new authority must remain sufficient for all previously acknowledged offsets. |
 
+### Candidate offline orphan investigation
+
+This is a reviewable runbook outline, **not an available repair command or
+authorization to remove files**. It applies only when the partition is stopped
+and a cooperating exclusive lock can be obtained. If identity, authority,
+certified history or storage assumptions are uncertain, stop and preserve the
+original and seek storage-recovery expertise.
+
+1. Stop writers/readers and prevent restart. Record the software version, exact
+   error, directory path, log and file identities, file names, sizes and hashes,
+   checkpoint bytes and any known ACK/unknown-outcome context. Do not treat the
+   journal epoch or generation as proof of the last ACK.
+2. Create and verify a complete offline evidence copy outside the log directory,
+   including the checkpoint, temporary files, all journals and segment files;
+   preserve file contents and relevant metadata. Inspect the copy with a
+   non-mutating tool that does not invoke the normal opener or truncate suffixes.
+   The project does not yet provide that candidate-format inspection tool.
+3. For a new unreferenced epoch, and separately for a stale checkpoint temporary,
+   report both the valid authority and the candidate artifact's content,
+   identity, checksum and offset ranges. Never promote either artifact into an
+   authority or conclude it was disposable solely from a filename or checksum.
+   Determine whether external rollback, missing certified data or uncooperative
+   modification is plausible. If so, retain the original and stop.
+4. Any future quarantine or removal from the live directory requires a separate
+   accepted procedure with exact no-overwrite, identity recheck, backup,
+   file/directory sync and restart rules. An operator must explicitly accept
+   the consequences for unknown append outcomes before mutation. Do not run a
+   generic manual rename or delete as a substitute. Once a reviewed procedure
+   exists, confirm its durable outcome and use ordinary open only on a copy
+   first; that open may truncate an uncertified suffix.
+
+Until such tooling and mutation rules are accepted and tested, **preserve the
+stopped partition for investigation**. An external copy is evidence, not a
+guarantee that a destructive action can be rolled back safely after the log
+accepts new writes.
+
 Cases combine with pre-existing checkpoint-temp and active-tail rules; earlier
 ambiguity/refusal wins over cleanup. A healthy log can remain unavailable after
 an interrupted pre-publication rotation because an unreferenced new epoch is
@@ -270,7 +306,15 @@ certified bytes and acknowledged offsets across each modeled restart.
 two-epoch example with real pre-existing event frames, prior-epoch snapshot,
 append, roll and append records, and a new-epoch snapshot/checkpoint. It also
 generates post-cleanup, orphan, temporary, missing-file, truncated, checksum,
-retired-corruption and dual-suffix examples. Preserved [fixture directories](../verification/adr024-journal-fixtures)
+retired-corruption and dual-suffix examples. Additional examples include a
+complete CRC-valid uncheckpointed commit with matching segment bytes; a
+checkpoint whose certified length ends inside a record despite a valid
+checkpoint CRC; a retirement-length/physical-file mismatch; and a short
+certified segment. Under the proposed order, the mid-record case is detected
+as invalid certified journal history at row 8, the retired-length mismatch at
+row 9, and the short segment at row 8. The valid suffix is uncertified even
+though it parses; the review verifier does not perform or prove truncation.
+Preserved [fixture directories](../verification/adr024-journal-fixtures)
 and their [SHA-256 inventory](../verification/adr024-journal-fixtures.sha256)
 are review artifacts. The generator is a standalone bitwise CRC implementation,
 not production or migration code; event frames are reused from the earlier

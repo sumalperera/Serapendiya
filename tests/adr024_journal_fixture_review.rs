@@ -184,6 +184,9 @@ fn multi_epoch_fixture_checks_and_old_reader_refusal() {
         "stale-temporary",
         "corrupt-retired",
         "journal-and-segment-suffix",
+        "valid-uncertified-commit",
+        "retired-length-mismatch",
+        "certified-segment-short",
     ] {
         assert!(checkpoint_and_active_valid(&root.join(name)), "{name}");
     }
@@ -192,6 +195,7 @@ fn multi_epoch_fixture_checks_and_old_reader_refusal() {
         "missing-active-journal",
         "bad-checkpoint-crc",
         "short-active",
+        "checkpoint-mid-record",
     ] {
         // The old authority's journal has multiple records; this fixture-specific
         // snapshot-only verifier intentionally does not parse it.
@@ -225,6 +229,41 @@ fn multi_epoch_fixture_checks_and_old_reader_refusal() {
     let damaged = fs::read(root.join("corrupt-retired/journal-00000000000000000000.log")).unwrap();
     assert_ne!(u32be(&cp[84..88]), crc32c::crc32c(&damaged));
     assert!(replay_fixture(&damaged).is_none());
+    let suffix_dir = root.join("valid-uncertified-commit");
+    let suffix_cp = fs::read(suffix_dir.join("journal-checkpoint")).unwrap();
+    let suffix_journal = fs::read(suffix_dir.join("journal-00000000000000000001.log")).unwrap();
+    let certified = usize::try_from(u64be(&suffix_cp[32..40])).unwrap();
+    assert_eq!(replay_fixture(&suffix_journal[..certified]).unwrap().0, 4);
+    let (full_seq, full_state) = replay_fixture(&suffix_journal).unwrap();
+    assert_eq!(full_seq, 5);
+    assert_eq!(suffix_journal.len() - certified, 72);
+    let active = fs::read(suffix_dir.join("segment-00000000000000000001.log")).unwrap();
+    assert_eq!(full_state.last().unwrap().2, active.len() as u64);
+    assert_eq!(full_state.last().unwrap().1, 3);
+    let prefix_len = usize::try_from(old_state_for_active_length(&root)).unwrap();
+    let suffix_frame = &active[prefix_len..];
+    assert_eq!(u64be(&suffix_frame[12..20]), 2);
+    assert_eq!(u64be(&suffix_frame[32..40]), 2);
+    assert_eq!(
+        crc32c::crc32c(&suffix_frame[..28]),
+        u32be(&suffix_frame[28..32])
+    );
+    assert_eq!(
+        crc32c::crc32c(&suffix_frame[32..]),
+        u32be(&suffix_frame[24..28])
+    );
+    let mismatch_cp = fs::read(root.join("retired-length-mismatch/journal-checkpoint")).unwrap();
+    assert!(checksum(&mismatch_cp));
+    assert_ne!(u64be(&mismatch_cp[68..76]), old.len() as u64);
+    let short =
+        fs::read(root.join("certified-segment-short/segment-00000000000000000001.log")).unwrap();
+    let certified_active_length = u64::try_from(
+        fs::read(root.join("rotation-with-retired/segment-00000000000000000001.log"))
+            .unwrap()
+            .len(),
+    )
+    .unwrap();
+    assert!(u64::try_from(short.len()).unwrap() < certified_active_length);
     for name in [
         "rotation-with-retired",
         "rotation-after-cleanup",
@@ -235,10 +274,20 @@ fn multi_epoch_fixture_checks_and_old_reader_refusal() {
         "corrupt-retired",
         "short-active",
         "journal-and-segment-suffix",
+        "valid-uncertified-commit",
+        "checkpoint-mid-record",
+        "retired-length-mismatch",
+        "certified-segment-short",
     ] {
         let dir = root.join(name);
         let before = snapshot(&dir);
         assert!(serapendiya::storage::Log::open(&dir).is_err(), "{name}");
         assert_eq!(snapshot(&dir), before, "old reader changed {name}");
     }
+}
+
+fn old_state_for_active_length(root: &Path) -> u64 {
+    let new =
+        fs::read(root.join("rotation-with-retired/journal-00000000000000000001.log")).unwrap();
+    replay_fixture(&new).unwrap().1.last().unwrap().2
 }

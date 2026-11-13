@@ -111,3 +111,30 @@ broken[-1] ^= 1
 put(root, "corrupt-retired", dict(files, **{journal0: bytes(broken)}))
 put(root, "short-active", dict(files, **{journal1: new[:-1]}))
 put(root, "journal-and-segment-suffix", dict(files, **{journal1: new + b"tail", segment1: f1 + b"tail"}))
+
+# A whole CRC-valid journal commit and matching event frame lie after the
+# checkpoint. They are deliberately uncertified even though they parse.
+f2 = bytearray(f1)
+f2[12:20] = U64(2)  # container base offset
+f2[32:40] = U64(2)  # Kafka batch base offset
+f2[24:28] = U32(crc(f2[32:]))
+f2[28:32] = U32(crc(f2[:28]))
+tail = record(2, 5, U64(1) + U64(len(f1)) + U64(len(f1) + len(f2)) + U64(2) + U64(3))
+assert len(tail) == 72
+without_retired = {k: v for k, v in files.items() if k != journal0}
+put(root, "valid-uncertified-commit", dict(without_retired, **{journal1: new + tail, segment1: f1 + bytes(f2)}))
+
+# The checkpoint checksum is valid, but its certified length ends inside a record.
+partial = bytearray(cp)
+partial[32:40] = U64(len(new) - 1)
+partial[-4:] = U32(crc(partial[:-4]))
+put(root, "checkpoint-mid-record", dict(files, **{"journal-checkpoint": bytes(partial)}))
+
+# Checkpoint retirement binding disagrees with the physical retired file length.
+wrong_retired_len = bytearray(cp)
+wrong_retired_len[68:76] = U64(len(old) + 1)
+wrong_retired_len[-4:] = U32(crc(wrong_retired_len[:-4]))
+put(root, "retired-length-mismatch", dict(files, **{"journal-checkpoint": bytes(wrong_retired_len)}))
+
+# The snapshot certifies the original frame length but the segment is shorter.
+put(root, "certified-segment-short", dict(files, **{segment1: f1[:-1]}))

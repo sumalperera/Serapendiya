@@ -190,6 +190,40 @@ it and refuse. A crash after checkpoint rename or directory-sync error can
 expose old or new authority; validate the actually observed state and preserve
 ambiguity. No ACK may depend on topology absent from durable authority.
 
+### Candidate admission and rotation trigger
+
+Before accepting a nonempty append group, validate input and calculate, with
+checked arithmetic and no mutation, whether the active segment requires a roll,
+the exact encoded journal record sizes (72 bytes for an append and, when needed,
+48 bytes for a segment roll), the required sequence increments, and projected
+live segment count. If a roll would add entry 4,097, reject before creating a
+segment or writing data. A journal snapshot retains all live segment entries:
+rotating the metadata journal does **not** reduce that count. At 4,096 entries,
+appends can continue while the current active segment does not require a roll;
+the first group requiring a 4,097th entry must be rejected. Only separately
+accepted event retention or a different accepted format can change that limit.
+
+If the current journal cannot hold all records required for the group, the
+working candidate requires a completed, separately accepted journal rotation
+**before** creating a new segment or writing the group's data. Verify that the
+new epoch's full snapshot plus the planned records fits the bound; otherwise
+reject before mutation. Check journal epoch/sequence overflow and that a prior
+retired artifact can be handled under an accepted procedure. A failure to
+complete rotation must never be bypassed by writing beyond the bound. A segment
+roll and its following append are separately published barriers; a crash after
+the roll but before the append can leave a certified empty active segment.
+Concurrency, request cancellation and independent-request coalescing remain
+separate decisions, so these calculations assume the current single log owner.
+
+The exact placement of a proactive threshold below 16 MiB and any reservation
+for future operations remain unmeasured alternatives. Rotating earlier may
+smooth latency or reduce replay but increases snapshot and synchronization work;
+it does not remove the live-segment liveness cliff. Test at bound-minus-one,
+exact fit and bound-plus-one, with and without a required segment roll, at
+4,095 and 4,096 entries, after target changes, and at epoch/sequence exhaustion.
+Capture file names and bytes before each pre-admission rejection to show that
+no mutation occurred. This is proposed behavior, not implemented code.
+
 The 16 MiB journal requires rotation to continue accepting commits. One
 candidate is to write a new journal header and complete snapshot of the
 certified state to an exclusively created epoch file, sync file and directory,
@@ -305,6 +339,27 @@ evidence for this new journal format.
   throughput, CPU, RSS, rotation pauses and full-scan startup. Record hardware,
   filesystem, compiler, sample counts and raw results. No candidate benchmark
   exists. Revisit the founder's direction based on these results.
+- Proposed **review thresholds**, not founder-accepted targets: at matched
+  offered load and durability, J1's median across paired run-level p99 append
+  latencies should be no more than 20% above the single-manifest candidate;
+  sustained throughput should be at least 90% of that candidate without
+  increasing error rate; and full-verification reopen time should be no more
+  than 25% higher at the same encoded history and segment count. A threshold
+  breach triggers design review, not automatic acceptance of another design.
+  Agree or revise these values and workload capacity **before** collecting
+  candidate results. Report individual runs, run ordering, noise and uncertainty;
+  do not assert a pass where variation makes the conclusion inconclusive. Use
+  at least five paired fresh-log runs per configuration, with at least 100,000
+  append-group samples per reported p99 and 1,000,000 per reported p99.9;
+  otherwise omit that percentile and report the sample count. Capture
+  scheduled/offered load as well as achieved load to avoid interpreting an
+  overloaded closed-loop test as a latency win. Report small-sample startup
+  observations directly rather than inventing a tail percentile.
+- Record duration and count separately for segment sync, journal sync,
+  checkpoint file sync, rename, directory sync and journal rotation. Sweep at
+  least two journal size limits and multiple segment counts including the
+  candidate maximum; include rotation with/without a retained old journal.
+  Fixture-only or arithmetic measurements do not satisfy this comparison.
 - Human acceptance is still needed for the exact format, rollover, recovery and
   migration before implementation. Retention, operator mutation and the
   independent-request coordinator remain separate decisions. G1 acceptance is
