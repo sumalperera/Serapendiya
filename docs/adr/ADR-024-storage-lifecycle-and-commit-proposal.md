@@ -30,11 +30,16 @@ authorization to copy code.
 
 ## Decision A: segmentation and derived metadata
 
-Proposed first implementation: configurable size-based rolling with a 64 MiB
+Proposed first implementation: configurable size-based rolling with a 128 MiB
 default target, at batch boundaries. An oversized supported batch remains whole;
 no group member can be split through a frame. Offset identity remains absolute
 and partition-local. Sealed segments are immutable; the active segment appends.
 Automatic deletion and compaction remain separate sub-gates with retention pins.
+
+The detailed candidate and its unaccepted capacity, metadata-cost, rollover,
+recovery and migration assumptions are developed in the
+[segmentation review](ADR-024-segmentation-review.md). Acceptance of Decision A
+must explicitly consider those assumptions; this proposal does not accept them.
 
 Specify a new independently versioned directory identity and durable manifest
 before coding. The manifest must identify the log, ordered segments, their
