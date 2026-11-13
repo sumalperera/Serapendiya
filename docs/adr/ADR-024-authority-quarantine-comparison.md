@@ -66,6 +66,57 @@ caller did not receive an ACK may legitimately appear after restart; the caller
 still has an unknown outcome. Recovering it does not establish exactly-once
 delivery. No algorithm here can identify whether an ACK reached the client.
 
+### Checkpoint cadence as a design axis
+
+The external review suggests acknowledging after each journal sync while
+publishing a checkpoint every N committed groups. This is a useful family of
+designs to compare, but cadence alone is not a complete recovery protocol.
+For finite N, a bound on acknowledged-but-not-checkpoint-certified groups exists
+only if admission and concurrency enforce it: checkpoint failure or delay must
+stop new acknowledgments before that bound is exceeded. Define whether the
+Nth group is acknowledged before or after checkpoint publication, in-flight
+requests, cancellation, checkpoint failure and restart. A time-only cadence
+without an admission limit has no fixed group-count bound. Journal rotation,
+snapshot bounds and disk exhaustion also remain explicit.
+
+| Design point | Acknowledgment and expected normal sync work | Certified-gap implication |
+| --- | --- | --- |
+| J1, checkpoint every group **before ACK** | Segment sync, journal sync, checkpoint-file sync, rename and directory sync before response: four explicit syncs. | The completed checkpoint covers every successful ACK in the stated filesystem model. |
+| N-group cadence, ACK after journal sync | Segment and journal sync for each group; checkpoint-file and directory sync on checkpoint publication. In an ideal serialized steady state, N groups per successful checkpoint gives 2 + 2/N explicit sync calls per group on average; it is not a latency or throughput result. | Up to N ACKed groups after the prior successful checkpoint can be outside its certified range **only if** the admission rule enforces that bound. State how a slow or failed checkpoint stops ACKs and how partial progress is reported. |
+| No per-commit checkpoint, ACK after journal sync | Two explicit syncs per group; snapshot/rotation work is additional. | No checkpoint-certified per-commit bound on the tail. Finite storage and replay still require a reviewed rotation and snapshot protocol. |
+
+`N = 1` is equivalent to J1 only if the checkpoint's complete publication
+barrier precedes that group's ACK. If the group is ACKed first and its
+checkpoint is written later, even `N = 1` has an acknowledged-but-uncertified
+interval. Durability of a complete synced record does not reveal whether its
+caller received the ACK. A fully valid post-checkpoint record can be considered
+for replay only after identity, sequence, topology, referenced segment bytes
+and data-before-journal ordering validate; it may represent an operation with
+an unknown client outcome. Record CRC alone does not prove all those properties.
+
+| Gap disposition | Consequence and unresolved choice |
+| --- | --- |
+| Refuse on an observed invalid/torn record, preserving it | Avoids silently truncating *observed* ambiguous damage, at an availability cost. Requires an operator path or explicitly accepted unavailability. It does not detect an acknowledged final record that is wholly missing and leaves no observable trace. |
+| Truncate/discard to the last valid record | Can silently lose an acknowledged record if the damaged bytes were previously acknowledged; this changes the corruption model and would need explicit founder acceptance. |
+| J1-style checkpoint before each ACK | Keeps an explicit certified boundary for each successful group, subject to honest sync assumptions; adds authority sync/publication work. External coherent rollback of the checkpoint and data remains undetectable. |
+
+These are distinct failure models rather than three proven ways to preserve the
+same guarantee. In the ordinary honest-sync power-loss model, a successful
+journal sync is assumed to persist its bytes; later data loss, truncation,
+misdirected writes or a device that falsely reports a successful sync must be
+assessed separately. The existing checkpoint can detect some missing or damaged
+journal bytes when the checkpoint still certifies them, not coherent rollback
+of all authority and data. Before any cadence change, explicitly decide which
+failure classes remain detectable and how availability changes.
+
+Ext4/XFS block/VM replay can test selected ordering and crash cut points, but a
+zero-failure run does not establish a zero failure rate or cover later media
+corruption, all devices, all cache behavior or external rollback. The RocksDB
+WAL-tracking design describes a particular choice with active-WAL limits and
+several sync paths; it should not be reduced to a fixed N-groups cadence or
+treated as proof of this protocol. Independent tests of this integration and
+explicit human acceptance of any changed failure model remain required.
+
 ## Restart observations: J1 versus J2
 
 The checkpoint in the table is the last authority actually observed after
@@ -124,6 +175,21 @@ accumulates unless a separately reviewed bounded archive or cleanup policy is
 chosen; an eventually full filesystem still needs backpressure. Preserving an
 artifact forever is not a disk bound. Neither automatic move nor unlink is
 authorized by this comparison.
+
+The review proposes an idempotent automatic move: if the specifically bound
+retired journal remains live, retry a same-filesystem no-replace move; if it is
+already in `retired/`, validate and treat it as non-authoritative. This could
+reduce routine intervention, but it is not yet proven safe. The design must
+specify lock/identity checks, behavior if the destination name already exists,
+creation and durability of the retirement directory, both directory syncs,
+EXDEV/unsupported errors, and collision or unexpected-entry refusal. Runtime
+rename atomicity and a claimed ext4/XFS journal transaction do not by themselves
+establish that every post-crash state contains exactly one durable copy. Test
+the concrete filesystems and mount configurations with power-loss replay; on
+both-present, neither-present, mismatched or unreadable evidence, do not infer
+success or erase artifacts. Allowing a validated move during recovery is a
+separate mutation decision. Even if moving is approved, the archive is not
+bounded until its cleanup and disk-exhaustion policies are reviewed.
 
 ## Decision and validation required
 
