@@ -30,6 +30,14 @@ authorization to copy code.
 
 ## Decision A: segmentation and derived metadata
 
+Planning update, 2026-11-13: the founder selected an append-only metadata
+journal as the direction to design, subject to later review against matched
+measurements. See [the alternatives review](ADR-024-segment-cap-alternatives-review.md).
+The single-replacement-manifest candidate below and its detailed segmentation
+review remain a comparison baseline, not the selected journal format. This
+direction does not accept journal bytes, recovery, migration or implementation;
+those require a concrete proposal and human acceptance under the existing gate.
+
 Proposed first implementation: configurable size-based rolling with a 128 MiB
 default target, at batch boundaries. An oversized supported batch remains whole;
 no group member can be split through a frame. Offset identity remains absolute
