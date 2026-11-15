@@ -24,6 +24,8 @@ and upstream documentation. This is targeted source and document review, not
 an exhaustive code audit, independent test, benchmark or approval. The linked
 upstream web documentation can change; revalidate release behavior and settings
 against the pinned source when running experiments. No upstream code is copied.
+The annotated `server-0.10.0` tag was dereferenced to the same commit via
+the [upstream tag object](https://api.github.com/repos/apache/iggy/git/tags/d7369a6b444db6955d16fd766006651922250c46).
 The existing [Iggy reference review](iggy-reference-review-2026-11-15.md) and
 [ADR-024 alternatives](../adr/ADR-024-segment-cap-alternatives-review.md)
 provide prior context. PR #34 merged research; its proposed formats and
@@ -83,6 +85,10 @@ can be scoped separately; persistent format changes, production deployment and
 later-gate implementation require their existing authorizations. Set numeric
 targets with the founder before measurement; no invented latency or schedule
 threshold is implied.
+
+A subsequent [clean-restart smoke test and partial source trace](../verification/iggy-0.10-baseline-smoke.md)
+are recorded separately. They cover only a local synthetic example; the full
+baseline and failure evidence below remain open.
 
 **Pre-registered decision criteria:** B is unsuitable for a required deployment
 if a reproducible test or source-backed analysis shows that its supported
