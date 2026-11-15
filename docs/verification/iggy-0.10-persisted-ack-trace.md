@@ -69,9 +69,28 @@ At the pinned source, `poll_options` sets
 `CommitPolicy::OnRead` directly in
 [the sink runtime](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/sink.rs#L738-L746).
 The runtime code inspected does not expose that choice through this poll-options
-construction. A failing-plugin reproduction and an independently controlled
-consumer/manual-offset comparison are still open; no connector failure test was
-run here.
+construction.
+
+The existing runtime unit test
+`sink::tests::given_every_run_failing_when_a_batch_is_split_should_report_no_processed_messages`
+passed locally with `cargo test --locked -p iggy-connectors
+sink::tests::given_every_run_failing_when_a_batch_is_split_should_report_no_processed_messages`.
+It confirms that failed plugin callback runs report errors and count zero
+processed messages. It does not exercise polling or a broker offset.
+
+The pinned integration suite also contains
+`rejected_document_reports_runtime_error` in
+[elasticsearch_sink.rs](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/integration/tests/connectors/elasticsearch/elasticsearch_sink.rs#L229-L289).
+That test sends a rejected document and asserts one consumed, zero processed,
+one error and zero destination documents. I did not run it: `docker info`
+reported that the Docker client could not connect to the local daemon, and its
+fixture starts an Elasticsearch container.
+
+A separate CLI observation from the process-kill probe showed a direct poll at
+offset 2 while the stored offset remained 1. This is a manual-offset CLI path,
+not the connector runtime, so it does not establish the behavior after an
+`OnRead` sink failure. The end-to-end connector offset result and a controlled
+consumer comparison remain open.
 
 ## Next evidence
 
