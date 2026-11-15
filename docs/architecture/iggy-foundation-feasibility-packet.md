@@ -37,7 +37,7 @@ protocols were not accepted.
 | Certified corruption and recovery | [Segment recovery](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/segment_recovery.rs) contains index/log recovery and refusal logic. [Partition WAL](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs) describes a two-slot in-place frontier and old-format refusal. A separate [superblock](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/superblock.rs) stores VSR state using alternating files. | Identify which authority actually protects each acknowledged singleton and replicated message; do not conflate the partition WAL, VSR superblock and message segment. Need tests for missing acknowledged tail, damaged certified data, interrupted roll, unknown outcome and old-reader behavior. External coherent rollback remains a distinct problem. |
 | Offset persistence | [Offset storage](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/offset_storage.rs) separates file sync and directory sync; [upstream documentation](https://iggy.apache.org/docs/server/durability/) says explicit offset durability is independent of message durability and poll auto-commit is asynchronous. | Configure and verify messages and offsets independently. Trace completion, failure and retention behavior; a successful poll is not proof that an offset update completed. |
 | Source delivery | The source runtime's [producer state mechanism](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/exactly_once.rs) describes a producer ID, epoch and batch sequence coupled to plugin state; [source runtime](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/source.rs) uses it in a configured mode. | Investigate its prerequisites and limits rather than rebuilding it by default. Its documented source-to-partition behavior does not establish exactly-once downstream side effects, arbitrary-provider replay or cross-partition transactions. |
-| Sink delivery | [Connector documentation](https://iggy.apache.org/docs/connectors/introduction/) describes sink offsets advancing on poll before external processing completes; [sink runtime](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/sink.rs) exposes plugin consumption. | For a chosen pinned runtime/configuration reproduce the sequence and failure case. Compare changing the runtime, a separately controlled consumer, and another maintained framework. Require a durable checkpoint only after the destination outcome is known or reconciled; define unknown results and duplicate handling. |
+| Sink delivery | [Connector documentation](https://iggy.apache.org/docs/connectors/introduction/) describes sink offsets advancing on poll before external processing completes; pinned [sink runtime](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/sink.rs) configures `CommitPolicy::OnRead` and describes the poll committing before consumption. | Reproduce the sequence and failure case for the pinned runtime/configuration. Compare changing the runtime, a separately controlled consumer, and another maintained framework. Require a durable checkpoint only after the destination outcome is known or reconciled; define unknown results and duplicate handling. |
 | Retention and identity | [Segment cleaner](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/server/src/segment_cleaner.rs), [topic options](https://iggy.apache.org/docs/server/topic-options/) and [concepts](https://iggy.apache.org/docs/introduction/concepts/) describe retention, stored-offset barriers and reusable numeric IDs. | Test whether persisted offsets can support each needed queue, mapping, replay and sink retention pin. With no stored offset the documented barrier is absent. Define stable source incarnation/identity and explicit retention exhaustion behavior; numeric IDs alone are not historical identity. |
 | Kafka | Pinned [gateway scope](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/gateways/kafka/docs/SCOPE.md) lists API versions and limitations; [gateway guide](https://iggy.apache.org/docs/gateways/kafka/) documents a separate service and disabled-by-default bridge. | Verify the actual pinned gateway/client/configuration. Advertise only a tested JVM/librdkafka matrix. Include bridge failure, unsupported APIs and persistence settings; no general compatibility claim. |
 | Mapping, enrichment, orchestration | Iggy's [connector SDK](https://iggy.apache.org/docs/connectors/sdk/) supplies source and sink extension points. | A product-specific mapping lifecycle, approvals, effective versions, event semantics, routing and cross-system evidence are not established by generic connectors. Decide external service versus fork modifications after the synthetic slice. |
@@ -48,7 +48,7 @@ protocols were not accepted.
 | Candidate | Potential benefit | Cost and specific unresolved risk |
 | --- | --- | --- |
 | A. Continue current Serapendiya engine | Control over certified-boundary protocol and existing tests. | Must build and maintain broader server, protocol, lifecycle and operations; storage acceptance remains open. |
-| B. Use Iggy via public interfaces | Fastest way to investigate fit while benefiting from upstream updates; less fork ownership. | APIs, connector behavior and failure guarantees may not meet requirements; test before adoption. |
+| B. Use Iggy via public interfaces | Fastest way to investigate fit while benefiting from upstream updates; less fork ownership. | APIs, connector behavior and failure guarantees may not meet requirements; test before adoption. The documented [0.9-to-0.10 upgrade](https://iggy.apache.org/docs/server/upgrading/) requires export/import to a fresh data directory and coordinated server/client cutover. Budget for that observed transition without assuming future releases break storage on a fixed cadence. |
 | C. Maintain an Iggy fork | Can alter storage, delivery, API or operational behavior where justified. | Own patch divergence, upgrades, source/license obligations and correctness of changes across storage and replication. |
 | D. Other maintained engine or component | May fit a specific protocol, state or delivery requirement better. | Adds selection and integration work; revisit current primary-source evidence and supported versions. |
 | E. Hybrid Iggy transport plus separate state/evidence store | Could preserve generic transport while managing mapping versions, checkpoint and scoped deduplication state separately. Existing Serapendiya storage is one unaccepted candidate; maintained alternatives must also be evaluated. | Two durable systems do not become one transaction. Define the authoritative payload, binding to identity/offset, publish and checkpoint order, unknown results, duplicate effects, retention, backup and cross-store recovery. A separate checkpoint cannot prove missing Iggy bytes were retained. |
@@ -83,6 +83,34 @@ can be scoped separately; persistent format changes, production deployment and
 later-gate implementation require their existing authorizations. Set numeric
 targets with the founder before measurement; no invented latency or schedule
 threshold is implied.
+
+**Pre-registered decision criteria:** B is unsuitable for a required deployment
+if a reproducible test or source-backed analysis shows that its supported
+interfaces cannot satisfy an accepted durability, ordering, retention or
+delivery contract and no acceptable configuration or external remedy exists.
+An unknown or untested condition is unresolved, not a failure or a pass. C is
+eligible only if a specific internal change has a reviewable failure model,
+tests, owner and upgrade cost, and B/E or an upstream fix do not adequately
+address the requirement. E must justify a separate authority beyond what Iggy's
+retention and offset mechanisms provide, and explain which state is ordinary
+application state versus a separately authoritative store. These criteria do
+not establish a fork selection or weaken any current contract.
+
+**Sequence:** Prioritize (1) a baseline, (2) the durability trace and (4)
+connector behavior. Use a provisional one-week time box for the trace, subject
+to availability; at its end record answered questions, missing evidence and
+maintenance implications. Difficulty understanding code is a maintenance signal,
+not proof of unsafety. Resolve a preliminary functional verdict before (7)
+comparative performance measurement. The block/VM replay in (3) remains
+separately authorized. Customer conversations, including audit history and
+replay needs, and provider-rights research proceed in parallel; no real customer
+data or commercial details belong in this public artifact.
+
+**Exit from B:** Before adopting Iggy, specify a portable export and restore path
+for payloads, stable identities, ordering, offsets, mapping versions, source
+provenance and evidence. Validate a copy into a distinct destination and test
+cutover and rollback without deleting the source. The current Serapendiya and
+Iggy formats are not known compatible; portability remains unproven.
 
 1. **Baseline:** build the exact pinned Iggy release in an isolated environment;
    record source SHA, toolchain, OS/filesystem, tests and config. Exercise
