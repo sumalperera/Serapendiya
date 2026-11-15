@@ -121,6 +121,12 @@ approaches and reusable components, record the chosen approach and deliberate
 differences, and define the correctness/performance evidence. This rule applies
 across all gates without granting implementation authority for future gates.
 
+The [Apache Iggy reference review](architecture/iggy-reference-review-2026-11-15.md)
+adds concrete questions for future storage, Kafka compatibility and Iceberg
+work. Compare durability under matched settings, review dual-slot frontiers
+against the certified-range contract, and test connector progress through
+partial failures. These are evaluation priorities, not accepted designs or
+authorization to implement later gates.
 
 Use [the technology reuse plan](architecture/technology-reuse-plan.md) as the
 decision checklist before building a subsystem. Reuse maintained libraries for
