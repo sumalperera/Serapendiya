@@ -1,104 +1,89 @@
 # Iggy 0.10 persisted ACK trace and process-kill probe
 
-Date: 2026-11-15. Source pin: Apache Iggy `server-0.10.0`, commit
-`91e0206367aad2d30259f7d45203832b08ae84e7`. This record combines source
-inspection with one local synthetic process-kill probe. It is not power-loss,
-corruption, syscall-tracing, performance, cross-platform or release evidence.
+Date: 2026-11-16. Source pin: Apache Iggy `server-0.10.0`, commit
+[`91e0206367aad2d30259f7d45203832b08ae84e7`](https://github.com/apache/iggy/tree/91e0206367aad2d30259f7d45203832b08ae84e7).
+This record combines source inspection, one post-ACK server process-kill probe,
+and a synthetic sink `OnRead` reproduction. It is not power-loss, storage
+corruption, syscall tracing, performance, cross-platform or release evidence.
 
 ## Source trace: singleton, message durability persisted
 
-The source exposes two related durability stages. The partition prepare journal
-frontier protects prepared operations before they can help commit; materialized
-message segments and indexes are then synchronized before the singleton
-persisted client reply. These are distinct structures and publication points.
+The path has two linked durable structures: the partition prepare WAL and the
+materialized message/index files. A volatile local commit value is not itself a
+durability certificate.
 
 | Order | Source-backed action | What the source establishes |
 | --- | --- | --- |
-| 1 | The prepare is appended to the partition prepare journal. The persistence worker batches eligible prepares in `append_batch_buffered`. | [PartitionPersistence::append_batch](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/persistence.rs#L1490-L1530) writes a batch and invokes `journal.sync()` for durable work. |
-| 2 | `PartitionPrepareJournal::sync` synchronizes its body barrier and journal file, then publishes the frontier. | [Journal sync](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L698-L714) joins body and file barriers, calls `publish`, and advances `durable_head`. [Frontier publication](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L1310-L1337) writes the selected slot and syncs the frontier file. |
-| 3 | Persistence completion wakes the partition. It sends `PrepareOk` only after the durable head/checksum covers the prepare; `send_prepare_ok` also gates required superblock persistence. | [Persisted-ack path](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L2355-L2393) and [PrepareOk gates](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L13693-L13726). This is a prepare acknowledgment to the consensus protocol, not yet the client reply. |
-| 4 | Once the singleton commit is selected, the persisted send takes the materialization path. The code writes committed message data and sparse index data to their segment files. | [Commit selection](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L11414-L11472) sets materialization for persisted singleton sends. [Materialization I/O](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/io.rs#L560-L610) submits message and index writes; the [message writer](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/messages_writer.rs#L114-L140) and [index writer](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_index_writer.rs#L110-L120) expose their sync behavior. |
-| 5 | Before commit publication, the persisted singleton path syncs the partition directory when segment names are dirty. The commit then publishes local commit state and sends the client reply. | [Commit directory barrier and publish transition](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L10940-L10970), [directory I/O](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/io.rs#L690-L710), [reply delivery](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L7258-L7275). |
+| 1 | The persistence worker batches eligible prepares and appends them to the partition prepare journal. | [PartitionPersistence::append_batch](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/persistence.rs#L1490-L1530) invokes `journal.sync()` for durable work. |
+| 2 | `PartitionPrepareJournal::sync` joins the body barrier and WAL-file sync, then publishes the frontier. | [Journal sync](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L698-L714) waits for both barriers before [frontier publication](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L1310-L1337) writes and syncs its selected slot and advances `durable_head`. |
+| 3 | Persistence completion gates `PrepareOk` on durable head/checksum coverage; required superblock persistence is also gated. | [PrepareOk path](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L13693-L13726). This is the prepare acknowledgement to consensus, not yet the client reply. |
+| 4 | For a persisted singleton send, materialization writes message and sparse-index bytes. | [Commit selection](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L11414-L11472) selects materialization; [MaterializationIoJob](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/io.rs#L560-L610) runs the writes. The file syncs were not omitted: [MessagesWriter::save_frozen_batches_at](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/messages_writer.rs#L114-L140) calls `fsync` when its persisted flag is set and the save completes; [MessagesWriter::fsync](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/messages_writer.rs#L160-L175) calls `File::sync_data`. [IggyIndexWriter::save_indexes_at](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_index_writer.rs#L110-L120) similarly calls [its `sync_data` fsync](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_index_writer.rs#L164-L178) when persisted and bytes were written. The persisted option is passed into both writers by [partition storage setup](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/partition_storage.rs#L590-L630). |
+| 5 | The persisted singleton path synchronizes the partition directory when segment names are dirty, then publishes commit state and replies. | [Commit directory barrier and phase](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L10935-L10975), [directory sync I/O](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/io.rs#L690-L710), and [reply delivery](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L7258-L7275). |
 
-The journal frontier in step 2 is published before `PrepareOk`; it is not a
-second final frontier written after segment-directory sync. A later WAL
-checkpoint can reclaim journal history after materialization. Do not flatten
-these structures into one guessed syscall sequence. This source trace identifies
-the main ordering, but it does not instrument syscalls, enumerate every
-interruption cut, or independently establish filesystem durability semantics.
+**Which structure certifies an acknowledged message?** Before the WAL checkpoint
+reclaims it, the published prepare-WAL frontier certifies the durable prepare
+(and any referenced message bodies); the persisted singleton commit is not
+replied to until message/index file syncs and any required segment-directory
+sync also complete. On recovery, the singleton path restores commit through
+the recovered WAL head and replays prepares
+([recovery code](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L1790-L1825)).
+The WAL can retire that coverage only after
+[`checkpoint_files`](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L584-L625)
+has synchronized materialized files and directories before checkpointing.
+Thus the answer is a handoff: the synced WAL frontier covers the operation
+until synced materialization is checkpointed; afterward the materialized
+segment/index state is the recovered representation. This is the source-level
+ordering, not a claim that this inspection independently proves filesystem
+semantics or every crash cut.
 
-The documented durability contract says singleton `persisted` synchronizes
-message/index data and newly created segment names before replying. This source
-trace is consistent with that ordering at the selected path. It does not prove
-missing-tail, corruption, or power-loss behavior; those require dedicated tests.
+## Server process-kill probe
 
-## Process-kill probe
+Environment and setup: the matching debug server and CLI on macOS arm64 used a
+temporary data directory. Topic `feasibility/sample` had one partition and
+one replica, with message and consumer-offset durability explicitly
+`persisted`.
 
-Environment and setup: the same pinned debug server and matching CLI from the
-[baseline smoke report](iggy-0.10-baseline-smoke.md), on macOS arm64, using the
-existing temporary local data directory. Topic `feasibility/sample` had
-message durability and consumer-offset durability explicitly set to
-`persisted`, with one partition and one replica. No customer data was used.
+After sending `sigkill-after-ack-20261115`, the CLI exited 0. The server was
+then sent SIGKILL and exited 137. On restart, polling from offset 2 returned
+that payload at offset 2; the stored consumer offset remained 1. The server
+then stopped cleanly. This is one post-ACK process-kill observation: the OS
+page cache survived, so this says nothing about sudden power loss, device-cache
+loss, corruption or a kill between write/sync calls.
 
-Procedure and observed results:
+## Sink `OnRead` reproduction
 
-1. Start the server against the same data directory with TCP on
-   `127.0.0.1:28090`, HTTP disabled, one unpinned shard.
-2. Run the matching CLI:
-   `iggy message send feasibility sample sigkill-after-ack-20261115`.
-   The CLI printed “Sent messages” and exited 0.
-3. After the CLI returned, send SIGKILL to the single test server process.
-   The server process exited with status 137; no graceful shutdown was requested.
-4. Restart the server with the same data directory. Polling from offset 2
-   returned `sigkill-after-ack-20261115` at offset 2; the CLI exited 0.
-5. The persisted consumer-offset query returned current offset 2 and stored
-   offset 1. This is consistent with the earlier explicit offset store and
-   confirms the test message did not depend on advancing that stored offset.
-6. Stop the restarted server with Ctrl-C; it reported clean shutdown.
+The full procedure and request/effect observations are in the
+[synthetic sink reproduction](iggy-connector-onread-reproduction.md).
+In summary, the built-in pinned sink sets `CommitPolicy::OnRead` directly in
+[`poll_options`](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/sink.rs#L738-L746);
+the inspected sink configuration has no commit-policy field.
 
-This is one successful post-ACK **process-kill** observation on one local
-configuration. The OS may have retained dirty cache contents after SIGKILL; this
-says nothing about sudden power loss or kernel/device cache loss. It does not
-test a crash between any two writes or sync calls, and it does not show how a
-corrupted certified tail is handled. No latency or cross-platform conclusion
-follows.
+On the local persisted single-replica setup, a synthetic HTTP endpoint returned
+500 for message offset 1. The group offset moved from 0 to 1, the runtime
+reported the callback error, and no effect was recorded. Restarting the sink
+against a success endpoint did not send that message again. In the corrected
+crash cut, message offset 3 was held before any endpoint effect; the group
+offset was already 3. SIGKILL terminated the runtime with status 137; after
+restart the message was not requested again and the endpoint still showed zero
+effects at observation time. This demonstrates the sink's poll-before-callback
+loss window in these runs, not an exactly-once or general delivery guarantee.
 
-## Connector follow-up
+The SDK defines `Manual` and `Auto` commit policies in
+[`poll_options.rs`](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/common/src/types/message/poll_options.rs#L28-L76).
+A separate explicit-offset CLI poll without `--auto-commit` returned offset 3
+without creating a stored offset for regular consumer 0; the sink consumer
+group remained at 3. This is a narrow manual-read observation, not a tested
+replacement sink or application checkpoint protocol. A custom SDK consumer
+using manual store-after-effect or a processing-based auto policy remains to
+be exercised.
 
-At the pinned source, `poll_options` sets
-`CommitPolicy::OnRead` directly in
-[the sink runtime](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/sink.rs#L738-L746).
-The runtime code inspected does not expose that choice through this poll-options
-construction.
+## Remaining evidence
 
-The existing runtime unit test
-`sink::tests::given_every_run_failing_when_a_batch_is_split_should_report_no_processed_messages`
-passed locally with `cargo test --locked -p iggy-connectors
-sink::tests::given_every_run_failing_when_a_batch_is_split_should_report_no_processed_messages`.
-It confirms that failed plugin callback runs report errors and count zero
-processed messages. It does not exercise polling or a broker offset.
-
-The pinned integration suite also contains
-`rejected_document_reports_runtime_error` in
-[elasticsearch_sink.rs](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/integration/tests/connectors/elasticsearch/elasticsearch_sink.rs#L229-L289).
-That test sends a rejected document and asserts one consumed, zero processed,
-one error and zero destination documents. I did not run it: `docker info`
-reported that the Docker client could not connect to the local daemon, and its
-fixture starts an Elasticsearch container.
-
-A separate CLI observation from the process-kill probe showed a direct poll at
-offset 2 while the stored offset remained 1. This is a manual-offset CLI path,
-not the connector runtime, so it does not establish the behavior after an
-`OnRead` sink failure. The end-to-end connector offset result and a controlled
-consumer comparison remain open.
-
-## Next evidence
-
-- Instrument or inject each source cut around journal append, both journal/body
-  syncs, frontier publication, segment/index writes and syncs, directory sync,
-  commit publication and reply.
-- Test damaged or missing acknowledged-tail data separately from process kill.
+- Instrument or inject each cut around journal append, body/WAL syncs, frontier
+  publication, message/index writes and syncs, directory sync, commit
+  publication and reply.
+- Test missing or damaged acknowledged-tail data separately from process kill.
 - Run filesystem/block replay only under its distinct authorization and report
-  the filesystem, kernel, device model and replay cut points.
-- Reproduce the sink offset behavior with a controlled failing plugin before
-  choosing a fork change or an external consumer design.
+  filesystem, kernel, device model and fixed replay cut points.
+- Test custom SDK `Manual`/`Auto` processing policy, destination-success /
+  lost-response ambiguity, retries and partial batches.
