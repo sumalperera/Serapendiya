@@ -13,8 +13,8 @@ cross-platform evidence.
 
 The sink runtime's `poll_options` sets `commit: CommitPolicy::OnRead`
 directly in [sink.rs](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/sink.rs#L738-L746).
-The setting is not read from `StreamConsumerConfig`; its configuration type
-contains batch and wait settings but no commit-policy setting. In the inspected
+The setting is not read from `StreamConsumerConfig`; its [pinned definition](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/connectors/runtime/src/configs/connectors.rs#L270-L286)
+contains batch and wait settings but no commit-policy field. In the inspected
 pinned runtime, sink offset policy is therefore hardcoded to `OnRead`.
 
 The SDK has other policies: `Manual` and `Auto` with a processing-related
