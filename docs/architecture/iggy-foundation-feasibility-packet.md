@@ -90,8 +90,8 @@ The [clean-restart smoke test](../verification/iggy-0.10-baseline-smoke.md),
 [expanded persisted-ACK source trace and server SIGKILL probe](../verification/iggy-0.10-persisted-ack-trace.md),
 and [sink OnRead reproduction](../verification/iggy-connector-onread-reproduction.md)
 are recorded separately. They cover one local synthetic configuration;
-crash-cut, corruption, block-replay and custom manual/processing-based consumer
-evidence remain open.
+crash-cut, corruption, block-replay, group rebalancing and destination-response
+ambiguity evidence remain open.
 
 **Pre-registered decision criteria:** B is unsuitable for a required deployment
 if a reproducible test or source-backed analysis shows that its supported
@@ -136,11 +136,11 @@ Iggy formats are not known compatible; portability remains unproven.
    replay. Record cut points, samples and platform; a passing process-kill test
    is not a power-loss test, and a finite zero-failure sample is not a proof.
 4. **Connector behavior:** the sink `OnRead` failure and post-poll SIGKILL
-   cases are now reproduced with a synthetic destination. Next test the SDK
-   `Manual`/processing-based `Auto` alternatives and source producer-state
-   prerequisites. Include destination success followed by lost response,
-   retries, crash between destination effect and checkpoint, duplicates and
-   partial batches. Compare external consumer control with runtime changes;
+   cases are reproduced. A standalone SDK consumer also exercised `Manual` and
+   `Auto` with `CommitAfter::Processing`; both retried after an effect followed
+   by callback failure, and the successful retry stored its offset. Next test
+   destination success with a lost response, group rebalance/failover, retries,
+   and partial batches. Compare external consumer control with runtime changes;
    do not infer an end-to-end guarantee from a source feature.
 5. **Synthetic industry-neutral slice:** two fake sources emit differently
    identified versions of one entity and a parameterized attribute. Preserve
