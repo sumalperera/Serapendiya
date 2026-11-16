@@ -82,6 +82,27 @@ both policies with a standalone partition consumer. Each redelivered after a
 simulated effect followed by callback failure; the successful retry stored
 offset 0. Group rebalancing and downstream lost-response behavior remain open.
 
+## Commit and recovery cut-point inventory
+
+This is a source-derived test plan, not a crash-safety result. “Expected after
+restart” records the behavior implied by the source ordering; every row still
+needs deterministic interruption evidence before it can be treated as proven.
+
+| Cut | Expected after restart from the source ordering | Evidence status / needed probe |
+| --- | --- | --- |
+| Prepare body/WAL writes or either sync, before frontier publication | No client ACK is possible yet. The prior published frontier remains the authority; whether recovery sees an unpublished tail must be checked against the journal recovery rules. | Source identifies the joined body/WAL sync and later frontier publication ([sync path](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L698-L714)); inject at each write/sync boundary and verify classification. |
+| Frontier slot write or sync, before PrepareOk | The client has not been replied to. Recovery may observe the old or newly published frontier depending on the cut; any recovered operation has an unknown client outcome. | Source shows slot write then sync ([publish](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L1317-L1333)); crash-inject around both, then verify recovery and no false ACK. |
+| After durable frontier / PrepareOk, before materialization completes | The prepare is recoverable from the WAL. Restart should reconstruct the committed singleton operation from the recovered head and replay/repair message materialization; client reply has not yet been sent. | Recovery source restores the singleton commit to head and replays prepares ([recovery](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L1807-L1835)); requires restart probes at this cut. |
+| During message/index write or while only one writer's sync has completed | The WAL remains the recovery source until checkpoint reclamation. A partial or mismatched materialization must not be served as certified data; restart must recover or refuse safely. | Both writer futures are joined and awaited ([materialization](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/io.rs#L600-L618)); inject writes and each sync separately and inspect recovery. |
+| Both file syncs complete, before required segment-directory sync | Client reply is still gated. WAL coverage remains; restart must not assume a newly created segment name is durable just because file contents synced. | Commit phase waits for dirty segment-directory sync before publication ([phase driver](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L10935-L10964)); inject before/after directory sync. |
+| Directory sync completes, before commit publication/reply | The data barriers completed, but the caller has no ACK yet. On restart the operation may be recovered from the durable WAL; the client outcome remains unknown. | Handler reaches publication only after I/O phases complete ([commit handler](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L10869-L10893)); process-kill at this exact cut is untested. |
+| Commit publication completes, before client reply arrives | The operation should remain recoverable; the client may retry because it did not observe the reply. Duplicate handling is a separate protocol question. | Source orders publish_pending_commit before reply delivery ([reply path](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L7258-L7263)); inject between publication and delivery. |
+| Materialized file/directory barriers complete, before WAL checkpoint publication | Recovery should still have WAL history if the checkpoint did not publish; if it did publish, the already-synced materialized representation is the recovery basis. | The checkpoint worker awaits file and directory barriers before checkpointing ([worker](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/persistence.rs#L1432-L1454), [journal checkpoint](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L584-L628)); inject during checkpoint publication and verify both observed states. |
+
+The existing SIGKILL probe covers only the quiet post-ACK case. It does not
+exercise any row above, prove the restart expectations, or establish power-loss
+semantics.
+
 ## Remaining evidence
 
 - Instrument or inject each cut around journal append, body/WAL syncs, frontier
