@@ -27,14 +27,18 @@ replied to until message/index file syncs and any required segment-directory
 sync also complete. On recovery, the singleton path restores commit through
 the recovered WAL head and replays prepares
 ([recovery code](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L1790-L1825)).
-The WAL can retire that coverage only after
-[`checkpoint_files`](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L584-L625)
-has synchronized materialized files and directories before checkpointing.
-Thus the answer is a handoff: the synced WAL frontier covers the operation
-until synced materialization is checkpointed; afterward the materialized
-segment/index state is the recovered representation. This is the source-level
-ordering, not a claim that this inspection independently proves filesystem
-semantics or every crash cut.
+The handoff is explicit in the source. The persistence worker awaits
+[`checkpoint_files`](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/persistence.rs#L1432-L1454);
+that method syncs listed materialized files and directories before publishing
+the WAL checkpoint ([checkpoint implementation](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L584-L628)).
+Recovery starts from the checkpoint op and recovered WAL head, replays prepares,
+and for a singleton restores commit through the recovered head
+([recovery path](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L1807-L1835)).
+So the source-level answer is a handoff: before checkpoint reclamation, the
+published WAL frontier is the recoverable prepare authority; after the synced
+checkpoint, segment/index state is the recovered message representation. The
+local commit value alone is not the certificate. This establishes source order,
+not filesystem semantics or every crash cut.
 
 ## Server process-kill probe
 
