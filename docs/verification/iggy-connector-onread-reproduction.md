@@ -70,6 +70,33 @@ application-level checkpoint protocol.
 - The SDK and CLI expose manual/other commit concepts, but this does not show
   that the built-in sink can configure them or establish their crash behavior.
 
+## SDK-controlled offset follow-up
+
+A temporary Rust example using the pinned public SDK `IggyConsumer` API was
+run against the same local broker, now as standalone consumers assigned to
+partition 0 (not consumer groups). Two fresh consumer IDs and empty effect
+ledgers were used.
+
+| Policy | First attempt | Restart | Observed result |
+| --- | --- | --- | --- |
+| `Manual` | The callback appended the message payload to a local effect ledger and synced it, then simulated failure before calling `commit(checkpoint)`. | The same consumer ID received the same message at offset 0, appended the effect again, then called `commit` successfully. | Ledger contains the same message twice; stored offset is 0. Manual storage preserves retry when the caller withholds the commit, with at-least-once duplicate risk after an effect/commit gap. |
+| `Auto` with `CommitAfter::Processing`, `every: Message` | `consume_messages` callback appended and synced the effect, then returned an error. The SDK returned a handler error. | The same consumer ID received offset 0 again; the callback succeeded, then consumer shutdown flushed the counted position. | Ledger contains the same message twice; stored offset is 0. Processing-based auto commit left the failed callback uncounted and stored after successful handling. |
+
+The CLI's regular-consumer offset query showed `Stored offset = 0` after
+each successful retry. The two effect ledgers each contain two identical
+payload lines, one from the effect-before-error attempt and one from the
+successful retry. The example and ledgers were temporary artifacts; no SDK
+source or production code was changed.
+
+This validates SDK-controlled behavior for a standalone partition consumer in
+one local debug run. It does not validate group assignment/rebalance behavior,
+broker failover, offset-storage failure, or a downstream system's response
+ambiguity. The example's file append models a durable effect only for ordering;
+it is not a transactional destination. The effect and offset remain separate
+systems, so an effect that succeeds while its response is lost can still be
+duplicated after restart. Use destination idempotency or reconciliation where
+available; do not claim exactly-once side effects.
+
 ## Limits and next test
 
 This is a small synthetic reproduction, not an exhaustive connector state
@@ -80,8 +107,7 @@ the plugin after a side effect. The held-request case kills the runtime before
 the endpoint records an effect; it does not model a remote service that commits
 the effect and then loses its response.
 
-Next, compare a small SDK consumer using `CommitPolicy::Manual` (store only
-after downstream success) and, if suitable, `Auto` with
-`CommitAfter::Processing`. Inject failures between destination effect and
-offset store and report duplicates/unknown outcomes. Do not infer exactly-once
-delivery from this OnRead result.
+Next, test destination-success/lost-response ambiguity and group rebalance or
+failover with the custom consumer; the current local run already shows the
+expected at-least-once duplicates in both SDK policies. Do not infer
+exactly-once delivery from these results.
