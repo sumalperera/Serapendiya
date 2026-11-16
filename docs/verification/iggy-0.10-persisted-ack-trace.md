@@ -73,9 +73,10 @@ The SDK defines `Manual` and `Auto` commit policies in
 A separate explicit-offset CLI poll without `--auto-commit` returned offset 3
 without creating a stored offset for regular consumer 0; the sink consumer
 group remained at 3. This is a narrow manual-read observation, not a tested
-replacement sink or application checkpoint protocol. A custom SDK consumer
-using manual store-after-effect or a processing-based auto policy remains to
-be exercised.
+replacement sink or application checkpoint protocol. The [follow-up reproduction](iggy-connector-onread-reproduction.md) exercised
+both policies with a standalone partition consumer. Each redelivered after a
+simulated effect followed by callback failure; the successful retry stored
+offset 0. Group rebalancing and downstream lost-response behavior remain open.
 
 ## Remaining evidence
 
@@ -85,5 +86,5 @@ be exercised.
 - Test missing or damaged acknowledged-tail data separately from process kill.
 - Run filesystem/block replay only under its distinct authorization and report
   filesystem, kernel, device model and fixed replay cut points.
-- Test custom SDK `Manual`/`Auto` processing policy, destination-success /
-  lost-response ambiguity, retries and partial batches.
+- Test destination-success/lost-response ambiguity, group rebalancing, retries
+  and partial batches with the custom SDK consumer.
