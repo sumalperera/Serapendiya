@@ -2,8 +2,8 @@
 
 Date: 2026-11-16. Source pin: Apache Iggy `server-0.10.0`, commit
 [`91e0206367aad2d30259f7d45203832b08ae84e7`](https://github.com/apache/iggy/tree/91e0206367aad2d30259f7d45203832b08ae84e7).
-This record combines source inspection, one post-ACK server process-kill probe,
-and a synthetic sink `OnRead` reproduction. It is not power-loss, storage
+This record combines source inspection, a quiet post-ACK server process-kill probe,
+a 20-cycle SIGKILL-under-load probe, and a synthetic sink `OnRead` reproduction. It is not power-loss, storage
 corruption, syscall tracing, performance, cross-platform or release evidence.
 
 ## Source trace: singleton, message durability persisted
@@ -99,9 +99,13 @@ needs deterministic interruption evidence before it can be treated as proven.
 | Commit publication completes, before client reply arrives | The operation should remain recoverable; the client may retry because it did not observe the reply. Duplicate handling is a separate protocol question. | Source orders publish_pending_commit before reply delivery ([reply path](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/iggy_partition.rs#L7258-L7263)); inject between publication and delivery. |
 | Materialized file/directory barriers complete, before WAL checkpoint publication | Recovery should still have WAL history if the checkpoint did not publish; if it did publish, the already-synced materialized representation is the recovery basis. | The checkpoint worker awaits file and directory barriers before checkpointing ([worker](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/partitions/src/persistence.rs#L1432-L1454), [journal checkpoint](https://github.com/apache/iggy/blob/91e0206367aad2d30259f7d45203832b08ae84e7/core/journal/src/partition_journal.rs#L584-L628)); inject during checkpoint publication and verify both observed states. |
 
-The existing SIGKILL probe covers only the quiet post-ACK case. It does not
-exercise any row above, prove the restart expectations, or establish power-loss
-semantics.
+The [20-cycle load probe](iggy-0.10-sigkill-under-load.md) supplements the
+quiet post-ACK observation: every cycle killed the broker with four producer
+workers active, and all 600 messages in successful send groups were recovered
+exactly once after restart. Eighty sends had no successful client response; five
+of those groups were present after restart. This remains process-crash evidence:
+it does not target a specific syscall cut, prove the table's restart expectations,
+or establish power-loss semantics.
 
 ## Remaining evidence
 
