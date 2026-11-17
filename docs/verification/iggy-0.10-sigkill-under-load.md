@@ -1,6 +1,6 @@
 # Iggy persisted SIGKILL-under-load probe
 
-Date: 2026-11-16. Source pin: Apache Iggy `server-0.10.0`, commit
+Date: 2026-11-16 (macOS run); Linux follow-up added 2026-11-17. Source pin: Apache Iggy `server-0.10.0`, commit
 [`91e0206367aad2d30259f7d45203832b08ae84e7`](https://github.com/apache/iggy/tree/91e0206367aad2d30259f7d45203832b08ae84e7).
 
 ## Scope
@@ -77,10 +77,9 @@ commit [`91e0206367aad2d30259f7d45203832b08ae84e7`](https://github.com/apache/ig
 The same SIGKILL-under-load runner was extended to select the `debug` or
 `release` binary directory. On Docker Desktop 29.9.2 (aarch64), its LinuxKit
 VM reported kernel `7.0.14-linuxkit`. The build container used the pinned
-`rust:1.99.1` image
-(`sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d8710131e0b39c50348e`)
-with Debian 13 (Trixie), rustc 1.99.1, and Cargo 1.99.1. The image digest recorded
-by Docker was `sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07`.
+`rust:1.99.1` image (Docker image digest
+`sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07`),
+with Debian 13 (Trixie), rustc 1.99.1, and Cargo 1.99.1.
 
 The repository's default release profile enables fat LTO and one codegen unit.
 That link attempt was terminated by SIGKILL near the Docker VM's 4 GiB memory
