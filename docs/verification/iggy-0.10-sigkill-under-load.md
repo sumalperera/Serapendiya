@@ -69,10 +69,64 @@ data, server log, per-round poll output and a machine-readable `results.json`.
 The script starts the server on an available loopback port, creates a fresh
 stream/topic, and kills only the broker process it started.
 
+## Linux follow-up: ext4 and XFS
+
+Date: 2026-11-17. Source pin remains Apache Iggy `server-0.10.0`,
+commit [`91e0206367aad2d30259f7d45203832b08ae84e7`](https://github.com/apache/iggy/tree/91e0206367aad2d30259f7d45203832b08ae84e7).
+
+The same SIGKILL-under-load runner was extended to select the `debug` or
+`release` binary directory. On Docker Desktop 29.9.2 (aarch64), its LinuxKit
+VM reported kernel `7.0.14-linuxkit`. The build container used the pinned
+`rust:1.99.1` image
+(`sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d8710131e0b39c50348e`)
+with Debian 13 (Trixie), rustc 1.99.1, and Cargo 1.99.1. The image digest recorded
+by Docker was `sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07`.
+
+The repository's default release profile enables fat LTO and one codegen unit.
+That link attempt was terminated by SIGKILL near the Docker VM's 4 GiB memory
+limit (container use reached about 3.4 GiB of its 3.5 GiB limit); no binary from
+that attempt was used. To stay within the available VM memory, the completed
+build used the optimized release profile with LTO disabled and eight codegen
+units:
+
+```sh
+CARGO_BUILD_JOBS=1 \
+CARGO_PROFILE_RELEASE_LTO=false \
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS=8 \
+cargo build --locked --release -p server -p iggy-cli
+```
+
+The successful build finished in 11m16s. The probe container was capped at
+1.5 CPUs and 3,000 MiB RAM. For each filesystem, a 512 MiB loopback image was
+formatted and mounted inside the privileged container using the LinuxKit
+kernel; the broker data directory was on that mount. Each run used the same
+four workers, four messages per request, and 20 SIGKILL/restart rounds as the
+macOS run. The container's privilege was used only for these disposable loop
+mounts.
+
+| Filesystem | Rounds passed | ACKed groups / messages | Unknown-outcome groups | Unknown groups observed after restart | Recovered messages at round 20 | ACKed messages missing or duplicated |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ext4 loopback | 20/20 | 227 / 908 | 80 | 4 | 924 | 0 |
+| XFS loopback | 20/20 | 242 / 968 | 79 | 1 | 972 | 0 |
+
+All 40 rounds passed: every ACKed message was present exactly once after each
+restart. Some requests whose clients did not receive a successful response
+were present after restart (four groups on ext4 and one on XFS), consistent with
+the unknown-outcome contract. Full machine-readable results are in
+[the ext4 JSON](iggy-0.10-sigkill-under-load-linux-ext4.json) and
+[the XFS JSON](iggy-0.10-sigkill-under-load-linux-xfs.json). Their SHA-256
+hashes are respectively
+`01d3ead2c82e868968a58615fdab51307f33a63ea6fbe5cc75e7c685672ef0df` and
+`255f097879d1acb73637351de1c22d9330487f22cc77ff245bad35eb460204eb`.
+
 ## Limits
 
-SIGKILL leaves the host kernel and page cache running. These observations do
-not test loss of unsynced pages during power failure, device-cache behavior,
-filesystem recovery, data corruption, a specific injected syscall cut, release
-build behavior, or Linux ext4/XFS. They do not replace the deterministic
-cut-point injection or block/VM replay required for stronger durability claims.
+These are process-crash observations. SIGKILL leaves the Linux kernel and its
+page cache running. The ext4 and XFS filesystems were loopback files inside
+Docker Desktop's Linux VM, not physical block devices. The runs do not test
+power loss, device-cache behavior, filesystem recovery after power loss,
+storage corruption, injected syscall cut points, block/VM replay, or performance.
+The default fat-LTO release binary was not built; the Linux probes used the
+optimized release profile described above. These results do not establish
+default-profile release behavior, bare-metal filesystem durability, production
+readiness, or cross-platform guarantees.
