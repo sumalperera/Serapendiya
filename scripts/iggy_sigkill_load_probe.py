@@ -21,6 +21,8 @@ def main():
                         help="built Apache Iggy checkout at the source pin under test")
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="new directory for isolated data, logs and results")
+    parser.add_argument("--profile", choices=("debug", "release"), default="debug",
+                        help="Cargo build profile containing the binaries")
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--messages-per-group", type=int, default=4)
@@ -30,10 +32,10 @@ def main():
         parser.error("rounds/workers must be positive and messages-per-group must be 1..50")
     root = args.iggy_root.resolve()
     output = args.output_dir.resolve()
-    server_bin = root / "target/debug/iggy-server"
-    cli_bin = root / "target/debug/iggy"
+    server_bin = root / f"target/{args.profile}/iggy-server"
+    cli_bin = root / f"target/{args.profile}/iggy"
     if not server_bin.is_file() or not cli_bin.is_file():
-        parser.error("expected target/debug/iggy-server and target/debug/iggy; build the pinned checkout first")
+        parser.error(f"expected target/{args.profile}/iggy-server and target/{args.profile}/iggy; build the pinned checkout first")
     output.mkdir(parents=True, exist_ok=False)
     data = output / "data"
     data.mkdir()
@@ -212,7 +214,7 @@ def main():
                 "source_pin": "91e0206367aad2d30259f7d45203832b08ae84e7",
                 "platform": sys.platform,
                 "python": sys.version,
-                "mode": "debug server; persisted message and consumer-offset durability; singleton partition",
+                "mode": f"{args.profile} server; persisted message and consumer-offset durability; singleton partition",
                 "rounds_requested": args.rounds,
                 "workers": args.workers,
                 "messages_per_group": args.messages_per_group,
